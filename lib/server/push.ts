@@ -170,8 +170,8 @@ export async function dispatchPushJobs(limit = 8) {
 
         const pushSubscription =
           subscriptionResult.data as
-            | PushSubscription
-            | null;
+          | PushSubscription
+          | null;
 
         /**
          * The event or target browser may have been
@@ -254,8 +254,8 @@ export async function dispatchPushJobs(limit = 8) {
 
         const follow =
           followResult.data as
-            | FollowPreference
-            | null;
+          | FollowPreference
+          | null;
 
         const eventTime = Date.parse(
           event.recorded_at,
@@ -276,12 +276,12 @@ export async function dispatchPushJobs(limit = 8) {
           event.level === null ||
           event.level < follow.min_level ||
           node.state_version !==
-            event.source_version ||
+          event.source_version ||
           !Number.isFinite(eventTime) ||
           Date.now() - eventTime >
-            180_000 ||
+          180_000 ||
           eventTime >
-            Date.now() + 30_000
+          Date.now() + 30_000
         ) {
           await finish({
             state: 'skipped',
@@ -377,8 +377,8 @@ export async function dispatchPushJobs(limit = 8) {
 
             body: request.body
               ? new Uint8Array(
-                  request.body,
-                ).buffer
+                request.body,
+              ).buffer
               : undefined,
 
             redirect: 'error',
@@ -390,23 +390,14 @@ export async function dispatchPushJobs(limit = 8) {
           },
         );
 
-        /**
-         * We do not need the push provider's response body.
-         */
         await response.body?.cancel();
 
-        /**
-         * 404 / 410 means the browser subscription
-         * no longer exists.
-         */
         if (
           response.status === 404 ||
           response.status === 410
         ) {
           const deletion = await db
-            .from(
-              'flow_push_subscriptions',
-            )
+            .from('flow_push_subscriptions')
             .delete()
             .eq(
               'id',
@@ -416,12 +407,6 @@ export async function dispatchPushJobs(limit = 8) {
           if (deletion.error) {
             throw deletion.error;
           }
-
-          await finish({
-            state: 'skipped',
-            last_error:
-              'Push subscription expired',
-          });
 
           skipped++;
           return;
@@ -458,7 +443,7 @@ export async function dispatchPushJobs(limit = 8) {
             Math.min(
               120_000,
               10_000 *
-                2 ** job.attempts,
+              2 ** job.attempts,
             );
 
           await finish({
@@ -469,7 +454,7 @@ export async function dispatchPushJobs(limit = 8) {
             next_attempt_at:
               new Date(
                 Date.now() +
-                  retryDelay,
+                retryDelay,
               ).toISOString(),
 
             last_error:
