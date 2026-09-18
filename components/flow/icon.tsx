@@ -2,6 +2,12 @@ import type { SVGProps } from 'react';
 
 // Lucide-derived paths retained from the supplied UI. See THIRD_PARTY.md (ISC).
 const paths = {
+  'flood': (
+    <>
+      <path d="m4 10 8-7 8 7M7 9v6h10V9M10 15v-4h4v4" />
+      <path d="M3 18c2-2 4 2 6 0s4 2 6 0 4 2 6 0M3 22c2-2 4 2 6 0s4 2 6 0 4 2 6 0" />
+    </>
+  ),
   'more': <>
     <circle
       cx="5"

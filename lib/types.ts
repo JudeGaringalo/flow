@@ -1,5 +1,7 @@
 export type Theme = 'light' | 'dark';
 
+export type Basemap = 'standard' | 'terrain' | 'satellite' | 'dark';
+
 export type Level = 0 | 1 | 2 | 3;
 
 export type Probes = [

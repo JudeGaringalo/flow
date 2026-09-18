@@ -12,10 +12,12 @@ import {
 } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { config } from '@/lib/config';
+import { isBasemap } from '@/lib/map-styles';
 import { ageText, distance, nodeStatus, shouldAlert } from '@/lib/core';
 import * as api from '@/lib/supabase';
 import type {
   Activity,
+  Basemap,
   Connection,
   FlowNode,
   Follow,
@@ -67,7 +69,8 @@ function useFlowController() {
   const [view, setView] = useState<'all' | 'saved'>('all'),
     [listOpen, setListOpen] = useState(false);
   const [expanded, setExpanded] = useState(false),
-    [theme, setTheme] = useState<Theme>('light');
+    [theme, setTheme] = useState<Theme>('light'),
+    [basemap, setBasemap] = useState<Basemap>('standard');
   const [saved, setSaved] = useState<string[]>([]),
     [follows, setFollows] = useState<Record<string, Follow>>({});
   const [activity, setActivity] = useState<Activity[]>([]),
@@ -176,6 +179,8 @@ function useFlowController() {
       setNow(Date.now());
       setOnline(navigator.onLine);
       setTheme(readStore<Theme>('theme', 'light'));
+      const storedBasemap = readStore<unknown>('basemap', 'standard');
+      setBasemap(isBasemap(storedBasemap) ? storedBasemap : 'standard');
       setSaved(readStore<string[]>('saved', []));
       // Do not import previous-version activity, example summaries or cached nodes.
       try {
@@ -237,6 +242,11 @@ function useFlowController() {
     if (ready)
       writeStore('saved', saved);
   }, [ready, saved]);
+
+  useEffect(() => {
+    if (ready)
+      writeStore('basemap', basemap);
+  }, [ready, basemap]);
 
   useEffect(
     () => {
@@ -489,6 +499,8 @@ function useFlowController() {
     setExpanded,
     theme,
     setTheme,
+    basemap,
+    setBasemap,
     saved,
     toggleSaved,
     follows,

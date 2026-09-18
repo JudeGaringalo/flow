@@ -29,12 +29,12 @@ export function NodeDetails() {
     last = valid.at(-1),
     previous = valid.at(-2);
   const trend = s.level === null
-    ? 'No current data'
+    ? 'Unconfirmed'
     : last?.level != null && previous?.level != null && last.level > previous.level
       ? 'Rising'
       : last?.level != null && previous?.level != null && last.level < previous.level
         ? 'Receding'
-        : 'No recent change';
+        : 'No change';
   const style = { '--status-color': s.color } as CSSProperties;
   const exportCSV = () => {
     const rows: unknown[][] = [
@@ -54,7 +54,9 @@ export function NodeDetails() {
     <section
       className={'details' + (f.expanded ? ' expanded' : '')}
       id="details"
+      data-status={s.key}
       aria-label={`${node.name} monitoring details`}
+      aria-labelledby="detail-location-title"
       style={style}
     >
       <button
@@ -74,6 +76,7 @@ export function NodeDetails() {
               didDrag.current = true;
           }
         }
+        onPointerCancel={() => { drag.current = null; didDrag.current = false; }}
         onPointerUp={
           e => {
             if (drag.current !== null && didDrag.current)
@@ -93,7 +96,7 @@ export function NodeDetails() {
       />
       <div className="detail-header">
         <div className="detail-title-row">
-          <h2>{node.name}</h2>
+          <h2 id="detail-location-title">{node.name}</h2>
           <button
             className={'icon-btn' + (f.saved.includes(node.id) ? ' is-saved' : '')}
             aria-label={f.saved.includes(node.id) ? 'Unsave location' : 'Save location'}
@@ -117,7 +120,7 @@ export function NodeDetails() {
             {' '}
             <strong>{f.age(node)}</strong>
           </span>
-          <span className="data-pill">{'SENSOR DATA'}</span>
+          <button className="detail-source-link" onClick={() => f.setTab('device')}>Sensor data</button>
         </div>
       </div>
       <div
@@ -143,7 +146,7 @@ export function NodeDetails() {
                   <div className="condition-icon">
                     <Icon name={s.key === 'unavailable'
                       ? 'wifi-off'
-                      : s.key === 'fault' ? 'triangle' : 'waves'} />
+                      : s.key === 'fault' ? 'triangle' : 'flood'} />
                   </div>
                   <div className="condition-copy">
                     <h3>{s.label}</h3>
@@ -155,7 +158,9 @@ export function NodeDetails() {
                   </div>
                 </div>
                 <div className="trend-indicator">
-                  <Icon name={trend === 'Receding' ? 'arrow-down' : 'arrow-up-right'} />
+                  {(trend === 'Rising' || trend === 'Receding') && (
+                    <Icon name={trend === 'Receding' ? 'arrow-down' : 'arrow-up-right'} />
+                  )}
                   {trend}
                 </div>
               </div>
@@ -163,7 +168,7 @@ export function NodeDetails() {
                 <div className="measure-card">
                   <Icon name="waves" />
                   <div>
-                    <p>Sensor level</p>
+                    <p>Water level</p>
                     <strong>
                       {s.level === null ? 'Unavailable' : `Level ${s.level} / 3`}
                     </strong>
@@ -173,12 +178,13 @@ export function NodeDetails() {
                   <Icon name="rain" />
                   <div>
                     <p>Rainfall (1h)</p>
-                    <strong className="unavailable-value">No rainfall feed</strong>
+                    <strong className="unavailable-value" aria-label="Rainfall not measured">—</strong>
+                    <small>Not connected</small>
                   </div>
                 </div>
               </div>
               <p className="measure-disclaimer">
-                The current device reports thresholds, not continuous depth or rainfall.
+                Threshold sensing only. Depth and rainfall are not measured.
               </p>
               <section className="recent-chart">
                 <div className="section-line">
@@ -187,7 +193,7 @@ export function NodeDetails() {
                 </div>
                 <HistoryChart />
                 <p className="chart-caption">
-                  Recorded threshold events · not continuous depth measurement
+                  Recorded threshold transitions · Philippine time
                 </p>
               </section>
               <section className="intelligence-card">
@@ -254,11 +260,11 @@ export function NodeDetails() {
                 >
                   <div className="support-heading">
                     <Icon name="route" />
-                    <h3>Route information</h3>
+                    <h3>Recommended Route</h3>
                     <span className="arrow">›</span>
                   </div>
-                  <p>No flood-aware routing connected. View options in your map app.</p>
-                  <small>ROAD PASSABILITY IS NOT VERIFIED</small>
+                  <p>No flood-aware route is available for this location.</p>
+                  <small>View map options</small>
                 </button>
                 <button
                   className="support-card countdown"
@@ -268,8 +274,8 @@ export function NodeDetails() {
                     <Icon name="clock" />
                     <h3>Time to Critical Level</h3>
                   </div>
-                  <strong className="no-estimate">Not available</strong>
-                  <p>Requires a validated forecasting model.</p>
+                  <strong className="no-estimate">—</strong>
+                  <p>No validated forecast available.</p>
                 </button>
               </div>
               <button
@@ -280,11 +286,11 @@ export function NodeDetails() {
                   <Icon name="arrow-down" />
                 </span>
                 <span className="recede-copy">
-                  <h3>Estimated Time to Recede</h3>
+                  <h3>Estimated Time To Recede</h3>
                   <span className="recede-value">
-                    <strong className="no-estimate">Not available</strong>
+                    <strong className="no-estimate">—</strong>
                     <span className="recede-description">
-                      A sensor summary cannot predict when floodwater will recede.
+                      Recession estimates are not available from threshold readings.
                     </span>
                   </span>
                 </span>
@@ -495,8 +501,7 @@ export function NodeDetails() {
           onClick={() => f.setModal('directions')}
         >
           <Icon name="navigation" />
-          {' '}
-          Get Directions
+          <span>Get Directions</span>
         </button>
         <p>Monitoring-point directions do not confirm a safe or passable route.</p>
       </footer>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
 import { useFlow } from '@/hooks/use-flow';
 import { config } from '@/lib/config';
+import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS, clock } from '@/lib/core';
 import { enablePush, disablePush } from '@/lib/push';
 import * as api from '@/lib/supabase';
@@ -14,7 +15,7 @@ const TITLES: Record<ModalKind, string> = {
   menu: 'FLOW, your way',
   layers: 'Map layers',
   settings: 'Settings & connection',
-  about: 'About Observations',
+  about: 'About observations',
   install: 'Install FLOW',
   directions: 'Open directions',
   forecast: 'About these estimates',
@@ -22,7 +23,7 @@ const TITLES: Record<ModalKind, string> = {
   alerts: 'Your location alerts',
   follow: 'Stay informed here',
   'ai-info': 'How this summary works',
-  admin: 'Node Administration',
+  admin: 'Node administration',
   'node-form': 'Configure node',
   token: 'Save your device token',
   wifi: 'Connect a node to Wi-Fi'
@@ -115,10 +116,10 @@ function Content({ kind, mapRef }: {
               f.setModal(null);
             }
           ],
-          ['settings', 'Settings & Connection', () => f.setModal('settings')],
-          ['lock', 'Node Administration', () => f.setModal('admin')],
+          ['settings', 'Settings & connection', () => f.setModal('settings')],
+          ['lock', 'Node administration', () => f.setModal('admin')],
           ['download', 'Install FLOW', () => f.setModal('install')],
-          ['info', 'About Observations', () => f.setModal('about')]
+          ['info', 'About observations', () => f.setModal('about')]
         ] as [
           IconName,
           string,
@@ -138,10 +139,36 @@ function Content({ kind, mapRef }: {
       </div>
     );
 
-  if (kind === 'layers')
+  if (kind === 'layers') {
+    const basemaps = BASEMAPS.map(({ id, label, description }) => ({
+      key: id, label, description,
+    }));
+
     return (
       <>
-        <p>Markers represent monitored points, not the extent of flooding.</p>
+        <p>Choose a map view. Street and place labels use the same source in every view.</p>
+
+        <div className="basemap-options">
+          {basemaps.map(({ key, label, description }) => (
+            <button
+              key={key}
+              className={'basemap-option basemap-' + key + (f.basemap === key ? ' active' : '')}
+              aria-pressed={f.basemap === key}
+              onClick={() => f.setBasemap(key)}
+            >
+              <span className="basemap-preview" aria-hidden="true" />
+              <span>
+                <strong>{label}</strong>
+                <small>{description}</small>
+              </span>
+              {f.basemap === key && <Icon name="check" />}
+            </button>
+          ))}
+        </div>
+
+        <h3>FLOW markers</h3>
+        <p>Filter monitoring points without changing the basemap.</p>
+
         <div className="layer-options">
           {(['all', 'advisory', 'watch', 'warning', 'below', 'unavailable', 'fault'] as ('all' | StatusKey)[]).map(
             key => (
@@ -157,15 +184,10 @@ function Content({ kind, mapRef }: {
                 />
                 {key === 'all' ? 'All nodes' : STATUS[key].short}
               </button>
-
-            ))}
+            )
+          )}
         </div>
-        <Toggle
-          label="Light map"
-          description="Switch between light and dark appearance."
-          checked={f.theme === 'light'}
-          onChange={() => f.setTheme(f.theme === 'light' ? 'dark' : 'light')}
-        />
+
         <button
           className="secondary-btn full"
           onClick={() => {
@@ -179,6 +201,7 @@ function Content({ kind, mapRef }: {
         </button>
       </>
     );
+  }
 
   if (kind === 'follow')
     return <FollowForm />;
@@ -356,6 +379,12 @@ function Content({ kind, mapRef }: {
       <p>
         The initial device reports Levels 1–3 only. No simulated flood data is generated
         by this application.
+      </p>
+      <p className="map-data-credit">
+        Streets and labels: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors.
+        Satellite imagery: Esri and its imagery contributors. Terrain elevation:
+        Mapzen / Tilezen, USGS, NOAA and other source contributors. Source credits
+        are also available in the small credit line on the map.
       </p>
     </>
   );
@@ -939,7 +968,7 @@ function NodeForm() {
           <span>Area</span>
           <input
             maxLength={100}
-            placeholder="City, Metro Manila"
+            placeholder="City or municipality"
             value={v.area}
             onChange={e => patch('area', e.target.value)}
           />
@@ -1125,8 +1154,27 @@ export function PwaRegistration() {
         installEvent = e as InstallPrompt;
       };
       window.addEventListener('beforeinstallprompt', capture);
-      if ('serviceWorker' in navigator && window.isSecureContext)
-        void navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => { });
+      if ('serviceWorker' in navigator && window.isSecureContext) {
+        if (process.env.NODE_ENV === 'production') {
+          void navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+        } else {
+          // Do not let a previous FLOW worker cache Next.js development bundles.
+          void navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+            for (const registration of registrations) {
+              const worker = registration.active || registration.waiting || registration.installing;
+              if (worker && new URL(worker.scriptURL).pathname === '/sw.js') {
+                await registration.unregister();
+              }
+            }
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.filter((key) =>
+                key.startsWith('flow-next-shell-') || key.startsWith('flow-shell-'),
+              ).map((key) => caches.delete(key)));
+            }
+          }).catch(() => {});
+        }
+      }
 
       return () => window.removeEventListener('beforeinstallprompt', capture);
     },

@@ -5,821 +5,296 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { Map as LibreMap, Marker as LibreMarker, } from 'maplibre-gl';
+import type { Map as LibreMap, Marker as LibreMarker } from 'maplibre-gl';
+
 import { useFlow } from '@/hooks/use-flow';
-import { config } from '@/lib/config';
-import type { FlowNode, MapHandle } from '@/lib/types';
+import { loadBasemap } from '@/lib/map-styles';
+import type { MapHandle } from '@/lib/types';
 
-/**
- * F.L.O.W. geographic map.
- *
- * MapLibre handles the WebGL map itself.
- * FLOW markers and application state stay inside React.
- */
-export const MapCanvas = forwardRef<MapHandle>(
-  function MapCanvas(_, ref) {
-    const flow = useFlow();
-    const latest = useRef(flow);
-    latest.current = flow;
-    const container = useRef<HTMLDivElement>(null);
-    const map = useRef<LibreMap | null>(null);
-    const mapModule = useRef<typeof import('maplibre-gl') | null>(null);
-    const markers = useRef(new Map<string, LibreMarker>());
-    const userMarker = useRef<LibreMarker | null>(null);
-    const [hosts, setHosts] = useState<{
-      id: string;
-      element: HTMLElement;
-    }[]>([]);
-    const [loaded, setLoaded] = useState(false);
-    const [mapError, setMapError] = useState(false);
-    const [size, setSize] = useState({
-      w: 390,
-      h: 720,
+interface MarkerHost {
+  id: string;
+  element: HTMLElement;
+}
+
+const INITIAL_CENTER: [number, number] = [121.034, 14.58];
+
+/** MapLibre draws geography. React renders only registered FLOW monitoring points. */
+export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
+  const flow = useFlow();
+  const latest = useRef(flow);
+  latest.current = flow;
+
+  const container = useRef<HTMLDivElement>(null);
+  const map = useRef<LibreMap | null>(null);
+  const library = useRef<typeof import('maplibre-gl') | null>(null);
+  const markers = useRef(new Map<string, LibreMarker>());
+  const userMarker = useRef<LibreMarker | null>(null);
+  const [hosts, setHosts] = useState<MarkerHost[]>([]);
+  const [engineReady, setEngineReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [mapIssue, setMapIssue] = useState('');
+  const [retry, setRetry] = useState(0);
+  const lastFocused = useRef<string | null>(null);
+
+  /** Offset the selected point into the portion not covered by the detail sheet. */
+  const focus = useCallback((id: string) => {
+    const instance = map.current;
+    const el = container.current;
+    const node = latest.current.nodes.find((item) => item.id === id);
+    if (!instance || !el || !node) return;
+
+    const sheet = document.getElementById('details');
+    const mobile = window.innerWidth <= 760;
+    const rect = el.getBoundingClientRect();
+    const sheetRect = sheet?.getBoundingClientRect();
+    const availableHeight = mobile && sheetRect
+      ? Math.max(120, sheetRect.top - rect.top)
+      : rect.height;
+    const coveredWidth = !mobile && sheetRect ? sheetRect.width + 40 : 0;
+
+    instance.easeTo({
+      center: [node.longitude, node.latitude],
+      zoom: Math.max(14, instance.getZoom()),
+      offset: [
+        -coveredWidth / 2,
+        mobile ? (availableHeight - rect.height) / 2 + 22 : 0,
+      ],
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
     });
-    const [zoom, setZoom] = useState(1);
-    const [offset, setOffset] = useState({
-      x: 0,
-      y: 0,
+  }, []);
+
+  const fit = useCallback(() => {
+    const instance = map.current;
+    const lib = library.current;
+    if (!instance || !lib) return;
+    const nodes = latest.current.visibleNodes.filter((node) =>
+      Number.isFinite(node.latitude) && Number.isFinite(node.longitude),
+    );
+    if (!nodes.length) return;
+
+    const bounds = new lib.LngLatBounds();
+    for (const node of nodes) bounds.extend([node.longitude, node.latitude]);
+    const h = container.current?.clientHeight ?? 640;
+    const mobile = window.innerWidth <= 760;
+    instance.fitBounds(bounds, {
+      padding: {
+        top: 100,
+        bottom: latest.current.selectedId && mobile ? h * 0.64 : 80,
+        left: 45,
+        right: latest.current.selectedId && !mobile ? 465 : 45,
+      },
+      maxZoom: 14.5,
+      duration: 320,
     });
-    const [user, setUser] = useState<{
-      latitude: number;
-      longitude: number;
-      accuracy: number;
-    } | null>(null);
-    const drag = useRef<{
-      x: number;
-      y: number;
-      ox: number;
-      oy: number;
-      didMove: boolean;
-    } | null>(null);
-    /**
-     * Bounds used only by the fallback schematic map.
-     */
-    const bounds = useMemo(
-      () => {
-        if (!flow.nodes.length) {
-          return {
-            minLon: 121.002,
-            maxLat: 14.602,
-            spanLon: 0.063,
-            spanLat: 0.062,
-          };
-        }
+  }, []);
 
-        const lons = flow.nodes.map((node) => node.longitude);
-        const lats = flow.nodes.map((node) => node.latitude);
-        const spanLon = Math.max(0.006, Math.max(...lons) - Math.min(...lons)) * 1.5;
-        const spanLat = Math.max(0.006, Math.max(...lats) - Math.min(...lats)) * 1.5;
-        return {
-          minLon: (Math.max(...lons) +
-            Math.min(...lons) -
-            spanLon) /
-            2,
-          maxLat: (Math.max(...lats) +
-            Math.min(...lats) +
-            spanLat) /
-            2,
-          spanLon,
-          spanLat,
-        };
-      },
-      [flow.nodes]
-    );
-    /**
-     * Geometry used for the fallback map.
-     */
-    const geometry = useMemo(
-      () => {
-        const scale = Math.max(size.w / 1250, size.h / 1200);
-        return {
-          scale,
-          x: (size.w - 1250 * scale) / 2 +
-            offset.x,
-          y: (size.h - 1200 * scale) / 2 +
-            offset.y,
-        };
-      },
-      [size, offset]
-    );
-    /**
-     * Convert geographic coordinates into our
-     * fallback SVG coordinate space.
-     */
-    const project = useCallback(
-      (node: {
-        latitude: number;
-        longitude: number;
-      }) => {
-        return [
-          ((node.longitude - bounds.minLon) /
-            bounds.spanLon) *
-          1250,
-          ((bounds.maxLat - node.latitude) /
-            bounds.spanLat) *
-          1200,
-        ];
-      },
-      [bounds]
-    );
-    /**
-     * Focus the map on one FLOW node.
-     */
-    const focus = useCallback(
-      (id: string) => {
-        const currentFlow = latest.current;
-        const node = currentFlow.nodes.find((item) => item.id === id);
-        if (!node)
-          return;
+  useImperativeHandle(ref, () => ({
+    focus,
+    fit,
+    zoomBy(delta) {
+      map.current?.zoomTo((map.current?.getZoom() ?? 14) + delta, { duration: 200 });
+    },
+    locate(latitude, longitude, accuracy) {
+      const instance = map.current;
+      const lib = library.current;
+      if (!instance || !lib) return;
+      userMarker.current?.remove();
+      const element = document.createElement('div');
+      element.className = 'user-dot';
+      element.title = `Your location (reported accuracy ±${Math.round(accuracy)} m)`;
+      userMarker.current = new lib.Marker({ element })
+        .setLngLat([longitude, latitude])
+        .addTo(instance);
+      instance.easeTo({ center: [longitude, latitude], zoom: 15, duration: 320 });
+    },
+  }), [focus, fit]);
 
-        const mobile = window.innerWidth <= 760;
-        /**
-         * Real MapLibre map.
-         */
-        if (map.current && loaded) {
-          map.current.easeTo(
-            {
-              center: [
-                node.longitude,
-                node.latitude,
-              ],
-              zoom: Math.max(map.current.getZoom(), 14),
-              offset: mobile
-                ? [
-                  0,
-                  -size.h *
-                  (currentFlow.expanded
-                    ? 0.4
-                    : 0.3),
-                ]
-                : [-210, 0],
-              duration: 350,
-            }
-          );
-          return;
-        }
+  useEffect(() => {
+    let cancelled = false;
+    let instance: LibreMap | null = null;
+    let observer: ResizeObserver | null = null;
 
-        /**
-                 * Fallback schematic map.
-                 */
-        const scale = Math.max(size.w / 1250, size.h / 1200);
-        const [x, y] = project(node);
-        setOffset(
-          {
-            x: size.w *
-              (mobile ? 0.5 : 0.4) -
-              (size.w - 1250 * scale) / 2 -
-              x * scale * zoom,
-            y: size.h *
-              (mobile ? 0.22 : 0.47) -
-              (size.h - 1200 * scale) / 2 -
-              y * scale * zoom,
-          }
-        );
-      },
-      [
-        size,
-        project,
-        zoom,
-        loaded,
-      ]
-    );
-    /**
-     * Fit all visible FLOW nodes.
-     */
-    const fit = useCallback(
-      () => {
-        setZoom(1);
-        setOffset({
-          x: 0,
-          y: 0,
+    async function initialize() {
+      try {
+        const lib = await import('maplibre-gl');
+        if (cancelled || !container.current) return;
+        library.current = lib;
+        instance = new lib.Map({
+          container: container.current,
+          center: INITIAL_CENTER,
+          zoom: 14,
+          minZoom: 3,
+          maxZoom: 19,
+          attributionControl: false,
+          style: {
+            version: 8,
+            sources: {},
+            layers: [{
+              id: 'loading-background',
+              type: 'background',
+              paint: { 'background-color': '#edf2f3' },
+            }],
+          },
         });
-        const currentFlow = latest.current;
-        if (map.current &&
-          mapModule.current &&
-          currentFlow.visibleNodes.length) {
-          const bounds = new mapModule.current.LngLatBounds();
-          currentFlow.visibleNodes.forEach((node) => {
-            bounds.extend([
-              node.longitude,
-              node.latitude,
-            ]);
+        map.current = instance;
+        setEngineReady(true);
+
+        instance.on('click', (event) => {
+          const current = latest.current;
+          if (!current.picking) return;
+          current.setEditing({
+            ...current.picking,
+            latitude: Number(event.lngLat.lat.toFixed(6)),
+            longitude: Number(event.lngLat.lng.toFixed(6)),
           });
-          map.current.fitBounds(bounds, {
-            padding: {
-              top: 100,
-              bottom: currentFlow.selectedId &&
-                window.innerWidth <= 760
-                ? size.h * 0.64
-                : 80,
-              left: 50,
-              right: currentFlow.selectedId &&
-                window.innerWidth > 760
-                ? 500
-                : 50,
-            },
-            maxZoom: 14.5,
-            duration: 350,
-          });
-        }
-      },
-      [size.h]
-    );
-    /**
-     * Zoom controls.
-     */
-    const zoomBy = useCallback(
-      (delta: number) => {
-        if (map.current && loaded) {
-          map.current.zoomTo(map.current.getZoom() + delta);
-          return;
-        }
-
-        setZoom(
-          (currentZoom) => {
-            const nextZoom = Math.max(0.5, Math.min(4, currentZoom *
-              (delta > 0 ? 1.2 : 1 / 1.2)));
-            const scale = Math.max(size.w / 1250, size.h / 1200);
-            const baseX = (size.w - 1250 * scale) / 2;
-            const baseY = (size.h - 1200 * scale) / 2;
-            setOffset(
-              (currentOffset) => ({
-                x: size.w / 2 -
-                  baseX -
-                  ((size.w / 2 -
-                    baseX -
-                    currentOffset.x) *
-                    nextZoom) /
-                  currentZoom,
-                y: size.h / 2 -
-                  baseY -
-                  ((size.h / 2 -
-                    baseY -
-                    currentOffset.y) *
-                    nextZoom) /
-                  currentZoom,
-              })
-            );
-            return nextZoom;
-          }
-        );
-      },
-      [
-        loaded,
-        size,
-      ]
-    );
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus,
-        fit,
-        zoomBy,
-        locate(latitude, longitude, accuracy) {
-          setUser({
-            latitude,
-            longitude,
-            accuracy,
-          });
-          if (map.current &&
-            mapModule.current &&
-            loaded) {
-            map.current.easeTo({
-              center: [
-                longitude,
-                latitude,
-              ],
-              zoom: 15,
-            });
-
-            userMarker.current?.remove();
-            const element = document.createElement('div');
-            element.className = 'user-dot';
-            element.title =
-              `Your location ±${Math.round(accuracy)} m`;
-            userMarker.current =
-              new mapModule.current.Marker({
-                element,
-              })
-                .setLngLat([
-                  longitude,
-                  latitude,
-                ])
-
-                .addTo(map.current);
-            return;
-          }
-
-          const scale = Math.max(size.w / 1250, size.h / 1200);
-          const [x, y] = project({
-            latitude,
-            longitude,
-          });
-          setOffset(
-            {
-              x: size.w / 2 -
-                (size.w -
-                  1250 * scale) /
-                2 -
-                x * scale * zoom,
-              y: size.h / 2 -
-                (size.h -
-                  1200 * scale) /
-                2 -
-                y * scale * zoom,
-            }
-          );
-        },
-      }),
-      [
-        focus,
-        fit,
-        zoomBy,
-        loaded,
-        size,
-        project,
-        zoom,
-      ]
-    );
-
-    /**
-         * Keep MapLibre sized correctly.
-         */
-    useEffect(
-      () => {
-        if (!container.current)
-          return;
-
-        const element = container.current;
-        const observer = new ResizeObserver(
-          ([entry]) => {
-            setSize({
-              w: entry.contentRect.width,
-              h: entry.contentRect.height,
-            });
-            map.current?.resize();
-          }
-        );
-        observer.observe(element);
-        return () => observer.disconnect();
-      },
-      []
-    );
-
-    /**
-         * Create MapLibre map.
-         */
-    useEffect(
-      () => {
-        let cancelled = false;
-        let created: LibreMap | null = null;
-        void import('maplibre-gl')
-
-          .then(
-            (lib) => {
-              if (cancelled ||
-                !container.current) {
-                return;
-              }
-
-              mapModule.current = lib;
-              created = new lib.Map(
-                {
-                  container: container.current,
-                  style: config[latest.current.theme ===
-                    'light'
-                    ? 'mapStyleLight'
-                    : 'mapStyleDark'],
-                  center: [
-                    121.032,
-                    14.577,
-                  ],
-                  zoom: 14,
-                  minZoom: 3,
-                  maxZoom: 19,
-                  /**
-                   * Important:
-                   * disable MapLibre's default
-                   * attribution UI.
-                   */
-                  attributionControl: false,
-                }
-              );
-              /**
-               * DO NOT add an AttributionControl here.
-               *
-               * The previous version had:
-               *
-               * created.addControl(
-               *   new lib.AttributionControl({
-               *     compact: true,
-               *   }),
-               *   'bottom-right'
-               * );
-               *
-               * It has been intentionally removed.
-               */
-              map.current = created;
-              created.on('load', () => {
-                if (cancelled)
-                  return;
-
-                setLoaded(true);
-                setMapError(false);
-              });
-              created.on('error', () => {
-                if (!cancelled) {
-                  setMapError(true);
-                }
-              });
-              /**
-               * Installer coordinate picker.
-               */
-              created.on('click', (event) => {
-                const currentFlow = latest.current;
-                if (currentFlow.picking) {
-                  currentFlow.setEditing(
-                    {
-                      ...currentFlow.picking,
-                      latitude: Number(event.lngLat.lat.toFixed(6)),
-                      longitude: Number(event.lngLat.lng.toFixed(6)),
-                    }
-                  );
-                  currentFlow.setPicking(null);
-                  currentFlow.setModal('node-form');
-                }
-              });
-            }
-          )
-
-          .catch(() => {
-            if (!cancelled) {
-              setMapError(true);
-            }
-          });
-        return () => {
-          cancelled = true;
-          markers.current.forEach((marker) => marker.remove());
-          markers.current.clear();
-          created?.remove();
-          map.current = null;
-        };
-      },
-      []
-    );
-
-    /**
-         * Switch light/dark map style.
-         */
-    useEffect(
-      () => {
-        if (map.current &&
-          loaded) {
-          map.current.setStyle(config[flow.theme === 'light'
-            ? 'mapStyleLight'
-            : 'mapStyleDark']);
-        }
-      },
-      [
-        flow.theme,
-        loaded,
-      ]
-    );
-
-    /**
-         * Synchronize FLOW nodes with
-         * MapLibre markers.
-         */
-    useEffect(
-      () => {
-        if (!loaded ||
-          !map.current ||
-          !mapModule.current) {
-          return;
-        }
-
-        const list: {
-          id: string;
-          element: HTMLElement;
-        }[] = [];
-        const active = new Set(flow.visibleNodes.map((node) => node.id));
-        /**
-         * Remove markers that are
-         * no longer visible.
-         */
-        for (const [id, marker] of markers.current) {
-          if (!active.has(id)) {
-            marker.remove();
-            markers.current.delete(id);
-          }
-        }
-
-        /**
-                 * Add/update current markers.
-                 */
-        for (const node of flow.visibleNodes) {
-          let marker = markers.current.get(node.id);
-          if (!marker) {
-            const element = document.createElement('div');
-            marker =
-              new mapModule.current.Marker({
-                element,
-              })
-                .setLngLat([
-                  node.longitude,
-                  node.latitude,
-                ])
-
-                .addTo(map.current);
-            markers.current.set(node.id, marker);
-          }
-
-          marker.setLngLat([
-            node.longitude,
-            node.latitude,
-          ]);
-          list.push({
-            id: node.id,
-            element: marker.getElement(),
-          });
-        }
-
-        setHosts(list);
-      },
-      [
-        loaded,
-        flow.visibleNodes,
-      ]
-    );
-
-    /**
-         * Focus selected node.
-         */
-    useEffect(
-      () => {
-        if (flow.selectedId) {
-          focus(flow.selectedId);
-        }
-        else if (loaded) {
-          fit();
-        }
-      },
-      [
-        flow.selectedId,
-        flow.expanded,
-        loaded,
-        focus,
-        fit,
-      ]
-    );
-
-    /**
-         * Fallback-map mouse-wheel zoom.
-         */
-    useEffect(
-      () => {
-        if (loaded ||
-          !container.current) {
-          return;
-        }
-
-        const element = container.current.parentElement;
-        if (!element)
-          return;
-
-        const handleWheel = (event: WheelEvent) => {
-          if ((event.target as HTMLElement).closest('.details, .search-dock, .sidebar, .map-controls')) {
-            return;
-          }
-
-          event.preventDefault();
-          zoomBy(event.deltaY < 0
-            ? 1
-            : -1);
-        };
-        element.addEventListener('wheel', handleWheel, {
-          passive: false,
+          current.setPicking(null);
+          current.setModal('node-form');
         });
-        return () => {
-          element.removeEventListener('wheel', handleWheel);
-        };
-      },
-      [
-        loaded,
-        zoomBy,
-      ]
-    );
+        instance.on('error', () => {
+          if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
+        });
 
-    /**
-         * React representation of
-         * one FLOW monitoring marker.
-         */
-    function marker(node: FlowNode) {
-      const status = flow.getStatus(node);
-      return (<button
-        className={'map-node' +
-          (flow.selectedId ===
-            node.id
-            ? ' selected'
-            : '')}
-        style={{
-          '--status-color': status.color,
-        } as CSSProperties}
-        data-unavailable={status.level === null}
-        aria-label={`${node.name}: ${status.label}. Open details.`}
-        aria-pressed={flow.selectedId ===
-          node.id}
-        onClick={
-          (event) => {
-            event.stopPropagation();
-            if (!flow.picking) {
-              flow.selectNode(node.id);
-            }
-          }
+        observer = new ResizeObserver(() => instance?.resize());
+        observer.observe(container.current);
+      } catch {
+        if (!cancelled) {
+          setMapIssue('The geographic map could not start in this browser.');
+          setLoading(false);
         }
-      >
-        <span className="marker-label">
-          {node.name}
-        </span>
-        <span className="pin-ring" />
-      </button>);
+      }
     }
 
-    return (<>
-      {/* Real geographic map */}
-      <div
-        ref={container}
-        id="map"
-        aria-label="Geographic monitoring map"
-      />
-      {/* Fallback when MapLibre cannot load */}
-      {!loaded
-        && (<div
-          className="fallback-map"
-          aria-label="Geographic basemap unavailable"
-          onPointerDown={
-            (event) => {
-              if ((event.target as HTMLElement).closest('button')) {
-                return;
-              }
+    void initialize();
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+      for (const marker of markers.current.values()) marker.remove();
+      markers.current.clear();
+      userMarker.current?.remove();
+      instance?.remove();
+      map.current = null;
+    };
+  }, []);
 
-              drag.current = {
-                x: event.clientX,
-                y: event.clientY,
-                ox: offset.x,
-                oy: offset.y,
-                didMove: false,
-              };
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }
-          }
-          onPointerMove={
-            (event) => {
-              if (!drag.current) {
-                return;
-              }
+  useEffect(() => {
+    if (!engineReady || !map.current) return;
+    const instance = map.current;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    let cancelled = false;
+    setLoading(true);
+    setMapIssue('');
 
-              const dx = event.clientX -
-                drag.current.x;
-              const dy = event.clientY -
-                drag.current.y;
-              if (Math.abs(dx) +
-                Math.abs(dy) >
-                4) {
-                drag.current.didMove =
-                  true;
-              }
+    const styleLoaded = () => {
+      if (!cancelled) setLoading(false);
+    };
+    instance.on('style.load', styleLoaded);
+    void loadBasemap(flow.basemap, controller.signal)
+      .then((style) => {
+        if (!cancelled) instance.setStyle(style, { diff: false });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setMapIssue('Map style unavailable. Your sensor readings have not been replaced.');
+        }
+      })
+      .finally(() => clearTimeout(timeout));
 
-              setOffset({
-                x: drag.current.ox +
-                  dx,
-                y: drag.current.oy +
-                  dy,
-              });
-            }
-          }
-          onPointerUp={
-            (event) => {
-              if (drag.current &&
-                !drag.current
-                  .didMove &&
-                flow.picking) {
-                const rect = event.currentTarget.getBoundingClientRect();
-                const x = (event.clientX -
-                  rect.left -
-                  geometry.x) /
-                  geometry.scale /
-                  zoom;
-                const y = (event.clientY -
-                  rect.top -
-                  geometry.y) /
-                  geometry.scale /
-                  zoom;
-                flow.setEditing(
-                  {
-                    ...flow.picking,
-                    latitude: Number((bounds.maxLat -
-                      (y / 1200) *
-                      bounds.spanLat).toFixed(6)),
-                    longitude: Number((bounds.minLon +
-                      (x / 1250) *
-                      bounds.spanLon).toFixed(6)),
-                  }
-                );
-                flow.setPicking(null);
-                flow.setModal('node-form');
-              }
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeout);
+      instance.off('style.load', styleLoaded);
+    };
+  }, [engineReady, flow.basemap, retry]);
 
-              drag.current = null;
-            }
-          }
-          onPointerCancel={() => {
-            drag.current = null;
-          }}
-        >
-          <svg
-            className="basemap"
-            viewBox={`0 0 ${size.w} ${size.h}`}
-            aria-hidden="true"
+  useEffect(() => {
+    const instance = map.current;
+    const lib = library.current;
+    if (!engineReady || !instance || !lib) return;
+    const active = new Set(flow.visibleNodes.map((node) => node.id));
+    const nextHosts: MarkerHost[] = [];
+
+    for (const [id, marker] of markers.current) {
+      if (!active.has(id)) {
+        marker.remove();
+        markers.current.delete(id);
+      }
+    }
+    for (const node of flow.visibleNodes) {
+      if (!Number.isFinite(node.latitude) || !Number.isFinite(node.longitude)) continue;
+      let marker = markers.current.get(node.id);
+      if (!marker) {
+        marker = new lib.Marker({ element: document.createElement('div') })
+          .setLngLat([node.longitude, node.latitude])
+          .addTo(instance);
+        markers.current.set(node.id, marker);
+      }
+      marker.setLngLat([node.longitude, node.latitude]);
+      nextHosts.push({ id: node.id, element: marker.getElement() });
+    }
+    setHosts(nextHosts);
+  }, [engineReady, flow.visibleNodes]);
+
+  useEffect(() => {
+    if (!engineReady || !flow.selectedId) {
+      lastFocused.current = null;
+      return;
+    }
+    // Do not reset the camera on every heartbeat or freshness tick.
+    const key = `${flow.selectedId}:${flow.expanded}`;
+    if (lastFocused.current === key) return;
+    lastFocused.current = key;
+    const frame = requestAnimationFrame(() => focus(flow.selectedId!));
+    return () => cancelAnimationFrame(frame);
+  }, [engineReady, flow.selectedId, flow.expanded, focus]);
+
+  return (
+    <>
+      <div ref={container} id="map" aria-label="Geographic monitoring map" />
+      {loading && !mapIssue && (
+        <div className="map-loading" role="status">
+          <span className="map-loading-dot" />
+          Loading map
+        </div>
+      )}
+      {mapIssue && (
+        <div className="map-provider-notice" role="status">
+          <span>{mapIssue}</span>
+          <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button>
+        </div>
+      )}
+      {hosts.map(({ id, element }) => {
+        const node = flow.nodes.find((item) => item.id === id);
+        if (!node) return null;
+        const status = flow.getStatus(node);
+        return createPortal(
+          <button
+            type="button"
+            className={`map-node${flow.selectedId === id ? ' selected' : ''}`}
+            style={{ '--status-color': status.color } as CSSProperties}
+            data-unavailable={status.level === null}
+            aria-label={`${node.name}: ${status.label}. Open details.`}
+            aria-pressed={flow.selectedId === id}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!flow.picking) flow.selectNode(id);
+            }}
           >
-            <rect
-              width={size.w}
-              height={size.h}
-              fill={flow.theme ===
-                'light'
-                ? '#f5f5f0'
-                : '#152637'}
-            />
-          </svg>
-          <div className="fallback-nodes">
-            {flow.visibleNodes.map(
-              (node) => {
-                const [x, y] = project(node);
-                return (<div
-                  className="fallback-node"
-                  key={node.id}
-                  style={
-                    {
-                      left: geometry.x +
-                        x *
-                        geometry.scale *
-                        zoom,
-                      top: geometry.y +
-                        y *
-                        geometry.scale *
-                        zoom,
-                    }
-                  }
-                >
-                  {marker(node)}
-                </div>);
-              }
-            )}
-            {user
-              &&
-              (() => {
-                const [x, y] = project(user);
-                return (<div
-                  className="user-dot fallback-node"
-                  style={
-                    {
-                      left: geometry.x +
-                        x *
-                        geometry.scale *
-                        zoom,
-                      top: geometry.y +
-                        y *
-                        geometry.scale *
-                        zoom,
-                    }
-                  }
-                  title={`Your location ±${Math.round(user.accuracy)} m`}
-                />);
-              })()}
-          </div>
-        </div>)}
-      {/* React markers rendered inside MapLibre */}
-      {loaded
-        &&
-        hosts.map(
-          ({ id, element, }) => {
-            const node = flow.nodes.find((item) => item.id === id);
-            return node
-              ? createPortal(marker(node), element, id)
-              : null;
-          }
-        )}
-      {/*
-          No MapLibre attribution control
-          is rendered here.
-        */}
-    </>);
-  }
-);
+            <span className="marker-label">{node.name}</span>
+            <span className="pin-ring" />
+          </button>,
+          element,
+          id,
+        );
+      })}
+    </>
+  );
+});
+

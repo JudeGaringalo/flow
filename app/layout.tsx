@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './globals.css';
+import './reference-ui.css';
 
 export const metadata: Metadata = {
   title: 'FLOW — Flood-Level Observation & Warning',

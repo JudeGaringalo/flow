@@ -1,4 +1,5 @@
-const CACHE = 'flow-next-shell-live-v4';
+/* FLOW service worker: public app shell and Web Push only. Never cache telemetry/API data. */
+const CACHE = 'flow-next-shell-live-v5';
 
 const OFFLINE = '/offline.html';
 
@@ -35,16 +36,11 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET' || u.origin !== self.location.origin)
     return;
 
-  // Leave Next.js bundles, API requests, and server-component data
-  // to the browser and Next.js. Do not serve cached copies.
-  if (
-    req.headers.get('RSC') === '1' ||
-    u.searchParams.has('_rsc') ||
-    u.pathname.startsWith('/api/') ||
-    u.pathname.startsWith('/_next/')
-  ) {
+  // Never cache App Router RSC payloads, API responses, auth or live sensor data.
+  if (req.headers.get('RSC') === '1' || u.searchParams.has('_rsc')
+    || u.pathname.startsWith('/api/')
+    || u.pathname.startsWith('/_next/'))
     return;
-  }
 
   if (req.mode === 'navigate') {
     event.respondWith(fetch(req).catch(() => caches.match(OFFLINE)));

@@ -108,7 +108,7 @@ function Workspace() {
             : !f.nodes.length
               ? 'No nodes registered'
               : f.nodes.some(n => f.getStatus(n).level !== null)
-                ? 'Live sensor updates'
+                ? 'Live flood conditions'
                 : 'No current readings';
 
   return (
@@ -122,8 +122,9 @@ function Workspace() {
       <header className="app-header">
         <button
           className="brand"
-          onClick={home}
-          aria-label="FLOW home"
+          onClick={() => f.setModal('menu')}
+          aria-label="Open FLOW menu"
+          title="FLOW menu"
         >
           <Image
             src="/assets/flow-wordmark.png"
@@ -143,28 +144,30 @@ function Workspace() {
             onClick={() => showList()}
           >
             <Icon name="map" />
-            {' '}
-            Live map
+            <span>Live map</span>
           </button>
           <button
             className={'nav-btn' + (f.view === 'saved' ? ' active' : '')}
             onClick={() => showList(true)}
           >
             <Icon name="bookmark" />
-            {' '}
-            Saved locations
-            {' '}
-            <span>{f.saved.length}</span>
+            <span>Saved locations</span>
+            <span className="nav-count">{f.saved.length}</span>
           </button>
         </nav>
         <div className="header-actions">
-          <span className="header-location">METRO MANILA</span>
           <button
             className="icon-btn"
             aria-label={f.theme === 'light'
               ? 'Switch to dark appearance'
               : 'Switch to light appearance'}
-            onClick={() => f.setTheme(f.theme === 'light' ? 'dark' : 'light')}
+            onClick={() => {
+              const next = f.theme === 'light' ? 'dark' : 'light';
+              f.setTheme(next);
+              if (f.basemap === 'standard' || f.basemap === 'dark') {
+                f.setBasemap(next === 'dark' ? 'dark' : 'standard');
+              }
+            }}
           >
             <Icon name={f.theme === 'light' ? 'moon' : 'sun'} />
           </button>
@@ -180,16 +183,16 @@ function Workspace() {
           </button>
           <button
             className="icon-btn more-menu"
-            aria-label="Open FLOW menu"
+            aria-label="More FLOW options"
             onClick={() => f.setModal('menu')}
           >
             <Icon name="more" />
           </button>
         </div>
       </header>
-      <main className="workspace">
+      <main className="workspace" data-flow-reference="2026-09">
         <div
-          className={'map-workspace' + (f.selected ? ' has-selection' : '')}
+          className={'map-workspace' + (f.selected ? ' has-selection' : '') + (f.expanded ? ' sheet-expanded' : '')}
           id="map-workspace"
           tabIndex={-1}
         >
@@ -272,7 +275,9 @@ function Workspace() {
                         ))
                     : (
                       <div className="search-empty">
-                        No monitored locations match. Try a street name or node ID.
+                        {!f.nodes.length
+                          ? 'No monitored locations yet. Registered sensors will appear here.'
+                          : 'No monitored locations match. Try a street name or node ID.'}
                       </div>
                     )}
                 </div>
@@ -359,7 +364,7 @@ function Workspace() {
             </button>
           </div>
           <div className="map-status">
-            <span className={'mode-badge' + (f.offline ? ' offline' : ' live')}>
+            <span className={'mode-badge' + (f.connection === 'live' && !f.offline && f.nodes.some(n => f.getStatus(n).level !== null) ? ' live' : ' offline')}>
               <span className="status-dot" />
               {statusLabel}
             </span>
