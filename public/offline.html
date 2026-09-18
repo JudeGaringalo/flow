@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width,initial-scale=1" name="viewport"/>
+    <meta content="#ffffff" name="theme-color"/>
+    <title>FLOW — Offline</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #fff;
+        color: #073c76;
+        font: 16px/1.65 system-ui,sans-serif;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 30px;
+      }
+
+      main {
+        max-width: 420px;
+        text-align: center;
+      }
+
+      img {
+        width: 105px;
+        height: 25px;
+      }
+
+      h1 {
+        font-size: 25px;
+        margin-top: 32px;
+      }
+
+      p {
+        color: #5e7085;
+      }
+
+      button {
+        border: 0;
+        border-radius: 12px;
+        background: #053c82;
+        color: white;
+        padding: 14px 28px;
+        font: 600 15px system-ui;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img alt="FLOW" src="/assets/flow-wordmark.png"/>
+      <h1>You’re offline.</h1>
+      <p>
+        Current flood conditions cannot be confirmed. Reconnect to receive fresh
+        sensor observations. Previously seen readings are not evidence of present
+        road conditions.
+      </p>
+      <button onclick="location.href='/'">
+        Try again
+      </button>
+    </main>
+  </body>
+</html>

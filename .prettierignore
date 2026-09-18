@@ -1,0 +1,22 @@
+# Generated files and dependencies
+.next/
+node_modules/
+out/
+build/
+coverage/
+.git/
+next-env.d.ts
+package-lock.json
+
+# Assets, credentials and inactive backup configuration
+public/assets/
+public/*.svg
+.env*
+*.disabled
+
+# SQL has been formatted separately; no extra parser/plugin is required.
+supabase/**/*.sql
+
+# Project-generated agent instructions
+AGENTS.md
+CLAUDE.md

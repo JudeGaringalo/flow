@@ -1,0 +1,44 @@
+F.L.O.W. Next.js / Node.js migration
+Based on FLOW_NextJS_Live_Only.zip
+
+CHANGED
+.env.example
+README.md
+THIRD_PARTY.md
+components/flow/dialogs.tsx
+docs/ESP32.md
+docs/LIVE_SETUP.md
+docs/QA.md
+lib/supabase.ts
+package.json
+scripts/generate-vapid.mjs
+supabase/schedule-push.sql
+
+ADDED
+.vscode/settings.json
+app/api/flow-intelligence/route.ts
+app/api/ingest-reading/route.ts
+app/api/manage-push/route.ts
+app/api/push-dispatch/route.ts
+app/api/register-node/route.ts
+docs/MIGRATE_FROM_EDGE.md
+lib/server/intelligence.ts
+lib/server/push.ts
+lib/server/runtime.ts
+lib/server/validation.ts
+scripts/test-node-api.mjs
+supabase/migrations/002_node_api.sql
+
+REMOVED FROM FULL PROJECT
+supabase/.env.example
+supabase/config.toml
+supabase/functions/_shared/runtime.ts
+supabase/functions/flow-intelligence/index.ts
+supabase/functions/ingest-reading/index.ts
+supabase/functions/manage-push/index.ts
+supabase/functions/push-dispatch/index.ts
+supabase/functions/register-node/index.ts
+
+PATCH EXCLUSIONS
+package.json: add packages without replacing your Next.js/React versions.
+.vscode/settings.json: remove Deno settings without overwriting other preferences.
