@@ -60,9 +60,12 @@ const paths = {
   'bookmark': <>
     <path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
   </>,
-  'bell': <>
-    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-11 12a2 2 0 0 0 4 0" />
-  </>,
+  'bell': (
+    <>
+      <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+      <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+    </>
+  ),
   'settings': <>
     <path
       d="M9.7 4.3 10.3 2h3.4l.6 2.3 2 .9 2.1-.7 1.7 2.9-1.5 1.7.2 2.2 1.8 1.6-1.7 2.9-2.3-.4-1.9 1.3-.6 2.3h-3.4l-.6-2.3-2-.9-2.1.7-1.7-2.9L6 12l-.2-2.2L4 8.2l1.7-2.9 2.3.4Z"
@@ -100,14 +103,25 @@ const paths = {
     <circle
       cx="12"
       cy="12"
-      r="6"
+      r="8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
     />
     <circle
       cx="12"
       cy="12"
-      r="2"
+      r="3.6"
+      fill="currentColor"
+      stroke="none"
     />
-    <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+    <path
+      d="M12 2v2m0 16v2M2 12h2m16 0h2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
   </>,
   'plus': <>
     <path d="M12 5v14M5 12h14" />
@@ -119,8 +133,21 @@ const paths = {
     <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
   </>,
   'layers': <>
-    <path d="m12 3 10 6-10 6L2 9Z" />
-    <path d="m2 13 10 6 10-6M2 17l10 6 10-6" />
+    <path 
+      d="m12 3 10 5-10 5L2 8Z"
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+    <path
+      d="m2 14 10 5 10-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </>,
   'flask': <>
     <path d="M9 3h6m-5 0v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L14 9V3M8 13h8" />
@@ -157,8 +184,10 @@ const paths = {
     <path d="M12 7v5l3 2" />
   </>,
   'refresh': <>
-    <path d="M20 7v5h-5M4 17v-5h5" />
-    <path d="M5.6 7A7 7 0 0 1 17 5l3 3M4 16l3 3a7 7 0 0 0 11.4-2" />
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M8 16H3v5" />
   </>,
   'arrow': <>
     <path d="M5 12h14m-5-5 5 5-5 5" />

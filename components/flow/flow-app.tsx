@@ -432,6 +432,7 @@ function LocationsList() {
           <Icon name="x" />
         </button>
       </div>
+
       <div className="mobile-map-tabs">
         <button
           className={'chip' + (f.view === 'all' ? ' active' : '')}
@@ -448,112 +449,116 @@ function LocationsList() {
           {f.saved.length}
         </button>
       </div>
-      <div className="network-overview">
-        <div>
-          <span className="overview-label">Network overview</span>
-          <span className="subtle">
-            {f.nodes.length}
-            {' '}
-            nodes
-          </span>
+        
+      <div className="sidebar-body">
+        <div className="network-overview">
+          <div>
+            <span className="overview-label">Network overview</span>
+            <span className="subtle">
+              {f.nodes.length}
+              {' '}
+              nodes
+            </span>
+          </div>
+          <div className="metric-row">
+            {(['warning', 'watch', 'online'] as const).map(
+              key => (
+                <button
+                  className="metric"
+                  key={key}
+                  onClick={() => f.setFilter(key)}
+                >
+                  <span className={'metric-number ' + key + '-text'}>{count(key)}</span>
+                  <span>
+                    {key === 'warning' ? 'Warning+' : key === 'watch' ? 'Watch' : 'Reporting'}
+                  </span>
+                </button>
+
+              ))}
+          </div>
         </div>
-        <div className="metric-row">
-          {(['warning', 'watch', 'online'] as const).map(
+        <div className="list-toolbar">
+          <h2>
+            {f.visibleNodes.length}
+            {' '}
+            locations
+          </h2>
+          <button
+            className="text-btn"
+            onClick={() => {
+              f.setQuery('');
+              f.setFilter('all');
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="filter-bar">
+          {(['all', 'advisory', 'watch', 'warning', 'unavailable'] as const).map(
             key => (
               <button
-                className="metric"
                 key={key}
+                className={'chip' + (f.filter === key ? ' active' : '')}
                 onClick={() => f.setFilter(key)}
               >
-                <span className={'metric-number ' + key + '-text'}>{count(key)}</span>
-                <span>
-                  {key === 'warning' ? 'Warning+' : key === 'watch' ? 'Watch' : 'Reporting'}
-                </span>
+                {key === 'all'
+                  ? 'All'
+                  : key === 'unavailable' ? 'Unavailable' : key[0].toUpperCase() + key.slice(1)}
               </button>
 
             ))}
         </div>
-      </div>
-      <div className="list-toolbar">
-        <h2>
-          {f.visibleNodes.length}
-          {' '}
-          locations
-        </h2>
-        <button
-          className="text-btn"
-          onClick={() => {
-            f.setQuery('');
-            f.setFilter('all');
-          }}
-        >
-          Clear filters
-        </button>
-      </div>
-      <div className="filter-bar">
-        {(['all', 'advisory', 'watch', 'warning', 'unavailable'] as const).map(
-          key => (
-            <button
-              key={key}
-              className={'chip' + (f.filter === key ? ' active' : '')}
-              onClick={() => f.setFilter(key)}
-            >
-              {key === 'all'
-                ? 'All'
-                : key === 'unavailable' ? 'Unavailable' : key[0].toUpperCase() + key.slice(1)}
-            </button>
-
-          ))}
-      </div>
-      <div className="location-list">
-        {f.visibleNodes.length
-          ? f.visibleNodes.map(
-            n => (
-              <article
-                className={'node-card' + (n.id === f.selectedId ? ' selected' : '')}
-                key={n.id}
-              >
-                <button
-                  className="node-select"
-                  onClick={() => f.selectNode(n.id)}
+        <div className="location-list">
+          {f.visibleNodes.length
+            ? f.visibleNodes.map(
+              n => (
+                <article
+                  className={'node-card' + (n.id === f.selectedId ? ' selected' : '')}
+                  key={n.id}
                 >
-                  <h3>{n.name}</h3>
-                  <p>{n.area}</p>
-                  <div className="node-meta">
-                    <span
-                      className="status-label"
-                      style={{ '--status-color': f.getStatus(n).color } as CSSProperties}
-                    >
-                      {f.getStatus(n).short}
-                    </span>
-                    <span>{f.age(n)}</span>
-                  </div>
-                </button>
-                <button
-                  className={'node-save' + (f.saved.includes(n.id) ? ' is-saved' : '')}
-                  aria-label={`${f.saved.includes(n.id) ? 'Unsave' : 'Save'} ${n.name}`}
-                  aria-pressed={f.saved.includes(n.id)}
-                  onClick={() => f.toggleSaved(n.id)}
-                >
-                  <Icon name="bookmark" />
-                </button>
-              </article>
+                  <button
+                    className="node-select"
+                    onClick={() => f.selectNode(n.id)}
+                  >
+                    <h3>{n.name}</h3>
+                    <p>{n.area}</p>
+                    <div className="node-meta">
+                      <span
+                        className="status-label"
+                        style={{ '--status-color': f.getStatus(n).color } as CSSProperties}
+                      >
+                        {f.getStatus(n).short}
+                      </span>
+                      <span>{f.age(n)}</span>
+                    </div>
+                  </button>
+                  <button
+                    className={'node-save' + (f.saved.includes(n.id) ? ' is-saved' : '')}
+                    aria-label={`${f.saved.includes(n.id) ? 'Unsave' : 'Save'} ${n.name}`}
+                    aria-pressed={f.saved.includes(n.id)}
+                    onClick={() => f.toggleSaved(n.id)}
+                  >
+                    <Icon name="bookmark" />
+                  </button>
+                </article>
 
-            ))
-          : (
-            <div className="empty-state">
-              <Icon name="search" />
-              <h3>{!f.nodes.length ? 'No sensors yet' : 'No matching locations'}</h3>
-              <p>
-                {!f.nodes.length
-                  ? (config.configured
-                    ? 'No sensors registered yet. An authorized installer can add the first node.'
-                    : 'Connect Supabase to register your first sensor. The map has no observations yet.')
-                  : 'Save a location or clear the filters to see more monitoring points.'}
-              </p>
-            </div>
-          )}
+              ))
+            : (
+              <div className="empty-state">
+                <Icon name="search" />
+                <h3>{!f.nodes.length ? 'No sensors yet' : 'No matching locations'}</h3>
+                <p>
+                  {!f.nodes.length
+                    ? (config.configured
+                      ? 'No sensors registered yet. An authorized installer can add the first node.'
+                      : 'Connect Supabase to register your first sensor. The map has no observations yet.')
+                    : 'Save a location or clear the filters to see more monitoring points.'}
+                </p>
+              </div>
+            )}
+        </div>
       </div>
+      
       <div className="sidebar-footer">
         <Icon name="shield" />
         <p>

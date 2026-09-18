@@ -14,7 +14,7 @@ const TITLES: Record<ModalKind, string> = {
   menu: 'FLOW, your way',
   layers: 'Map layers',
   settings: 'Settings & connection',
-  about: 'About observations',
+  about: 'About Observations',
   install: 'Install FLOW',
   directions: 'Open directions',
   forecast: 'About these estimates',
@@ -22,7 +22,7 @@ const TITLES: Record<ModalKind, string> = {
   alerts: 'Your location alerts',
   follow: 'Stay informed here',
   'ai-info': 'How this summary works',
-  admin: 'Node administration',
+  admin: 'Node Administration',
   'node-form': 'Configure node',
   token: 'Save your device token',
   wifi: 'Connect a node to Wi-Fi'
@@ -115,10 +115,10 @@ function Content({ kind, mapRef }: {
               f.setModal(null);
             }
           ],
-          ['settings', 'Settings & connection', () => f.setModal('settings')],
-          ['lock', 'Node administration', () => f.setModal('admin')],
+          ['settings', 'Settings & Connection', () => f.setModal('settings')],
+          ['lock', 'Node Administration', () => f.setModal('admin')],
           ['download', 'Install FLOW', () => f.setModal('install')],
-          ['info', 'About observations', () => f.setModal('about')]
+          ['info', 'About Observations', () => f.setModal('about')]
         ] as [
           IconName,
           string,

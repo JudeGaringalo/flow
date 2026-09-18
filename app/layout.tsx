@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   applicationName: 'FLOW',
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/assets/icon-192.png',
-    apple: '/assets/icon-192.png'
+    icon: '/assets/flow-wave.png',
+    apple: '/assets/flow-wave.png'
   },
   appleWebApp: {
     capable: true,

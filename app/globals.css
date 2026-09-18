@@ -553,6 +553,12 @@ h4 {
   scrollbar-color: var(--panel3) transparent;
 }
 
+.sidebar-body {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel3) transparent;
+}
+
 .node-card {
   position: relative;
   display: flex;
@@ -1472,6 +1478,14 @@ h4 {
   justify-content: center;
   gap: 7px;
   font-size: 12px;
+  filter: none;
+  transition: none;
+}
+
+.secondary-btn:hover {
+  background-color: var(--panel3);
+  border-color: transparent;
+  filter: none;
 }
 
 .secondary-btn svg {
@@ -1853,7 +1867,6 @@ input[type=checkbox] {
   align-items: center;
   justify-content: space-between;
   padding: 14px 0;
-  border-bottom: 1px solid var(--line);
   gap: 15px;
 }
 
@@ -2764,7 +2777,7 @@ body.light {
     min-height: 36px;
   }
   .sidebar-heading h1 {
-    max-width: calc(100% - 35px);
+    max-width: none;
   }
   .details.expanded .detail-header .eyebrow {
     font-size: 8px;
@@ -3368,10 +3381,20 @@ body:not(.light) .brand img {
   font-size: 19px;
   letter-spacing: -.5px;
   margin: 5px 0 0;
+  max-width: none;
 }
 
 .sidebar-heading .eyebrow {
   font-size: 9px;
+}
+
+.sidebar-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-heading > .icon-btn {
+  flex-shrink: 0;
 }
 
 .network-overview {
@@ -4113,14 +4136,27 @@ body:not(.light) .support-card {
 }
 
 .menu-list button {
-  background: none;
+  background-color: transparent;
   padding: 13px 5px;
   display: flex;
   gap: 12px;
   align-items: center;
   text-align: left;
+  border-radius: 8px;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
+  filter: none;
+  transition: none;
+}
+
+.menu-list button:hover {
+  background-color: var(--panel3);
+  border-bottom-color: transparent;
+  filter: none;
+}
+
+.menu-list button:has(+ button:hover) {
+  border-bottom-color: transparent;
 }
 
 .menu-list button:last-child {
