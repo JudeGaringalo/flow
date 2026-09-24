@@ -6,8 +6,7 @@ import {
   json,
   newDeviceToken,
   readJson,
-  requireAdmin,
-  takeLimit,
+  requireInstallerSecret,
   ApiError
 } from '@/lib/server/runtime';
 import { nodeBody } from '@/lib/server/validation';
@@ -21,10 +20,7 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   try {
     checkOrigin(req);
-    const user = await requireAdmin(req);
-    if (!await takeLimit('admin:' + user.id, 20))
-      throw new ApiError(429, 'Rate limit');
-
+    requireInstallerSecret(req);
     const body = nodeBody(await readJson(req));
     const token = body.action === 'update' ? null : newDeviceToken();
     // One transaction: node registration and credential creation cannot split.

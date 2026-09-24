@@ -43,10 +43,7 @@ function Workspace() {
 
         if (event.key === 'Escape' && !f.modal) {
           setSearchOpen(false);
-          if (f.picking)
-            f.setPicking(null);
-          else
-            f.closeDetails();
+          f.closeDetails();
         }
       };
       document.addEventListener('pointerdown', pointer);
@@ -56,7 +53,7 @@ function Workspace() {
         document.removeEventListener('keydown', key);
       };
     },
-    [f.modal, f.picking]
+    [f.modal]
   );
 
   function home() {
@@ -88,7 +85,6 @@ function Workspace() {
     );
   }
 
-  const unread = f.activity.filter(a => !a.read).length;
   const statusLabel = !f.ready
     ? 'Loading FLOW…'
     : !config.configured
@@ -130,16 +126,6 @@ function Workspace() {
           <span>FLOOD-LEVEL OBSERVATION &amp; WARNING</span>
         </button>
         <div className="header-actions">
-          <button
-            className="icon-btn"
-            aria-label="Open notifications"
-            onClick={() => f.setModal('alerts')}
-          >
-            <Icon name="bell" />
-            {unread > 0 && (
-              <span className="notification-count">{unread > 9 ? '9+' : unread}</span>
-            )}
-          </button>
           <button
             className="icon-btn more-menu"
             aria-label="More FLOW options"
@@ -242,28 +228,13 @@ function Workspace() {
                 </div>
               )}
           </div>
-          {(f.offline || f.picking)
+          {f.offline
             && (
               <div
                 className="map-message"
                 role="status"
               >
-                {f.picking
-                  ? (
-                    <>
-                      <strong>Tap the map to set coordinates.</strong>
-                      {' '}
-                      Verify the installation position.
-                      {' '}
-                      <button
-                        className="text-btn"
-                        onClick={() => f.setPicking(null)}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  )
-                  : !config.configured
+                {!config.configured
                     ? 'Connect Supabase to register your first sensor. No readings are available yet.'
                     : f.connection === 'loading'
                       ? 'Connecting to sensor observations…'
@@ -340,21 +311,6 @@ function Workspace() {
 
           ))}
       </div>
-      {!f.ready
-        && (
-          <div
-            className="initial-loading"
-            role="status"
-          >
-            <Image
-              src="/assets/flow-intelligence.png"
-              width={32}
-              height={30}
-              alt=""
-            />
-            <span>Opening your monitoring map…</span>
-          </div>
-        )}
     </>
   );
 }

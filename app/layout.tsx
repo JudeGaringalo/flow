@@ -5,12 +5,12 @@ import './reference-ui.css';
 
 export const metadata: Metadata = {
   title: 'FLOW',
-  description: 'A map-first view of monitored flood conditions, with sensor history and FLOW Intelligence.',
+  description: 'A map-first view of monitored flood conditions, with current ESP32 sensor observations.',
   applicationName: 'FLOW',
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/assets/flow-wave.png',
-    apple: '/assets/flow-wave.png'
+    icon: '/assets/flow-icon.png',
+    apple: '/assets/flow-icon.png'
   },
   appleWebApp: {
     capable: true,

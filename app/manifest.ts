@@ -3,7 +3,7 @@ import type { MetadataRoute } from 'next';
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',
-    name: 'FLOW — Flood-Level Observation & Warning',
+    name: 'FLOW',
     short_name: 'FLOW',
     description: 'Map-first flood observation and sensor information.',
     start_url: '/',
@@ -13,12 +13,12 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#053c82',
     icons: [
       {
-        src: '/assets/icon-192.png',
+        src: '/assets/flow-icon.png',
         sizes: '192x192',
         type: 'image/png'
       },
       {
-        src: '/assets/icon-512.png',
+        src: '/assets/flow-icon.png',
         sizes: '512x512',
         type: 'image/png',
         purpose: 'any'

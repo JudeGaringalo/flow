@@ -71,8 +71,6 @@ const hook = fs.readFileSync('hooks/use-flow.tsx', 'utf8');
 
 test('Node state starts empty', () => assert.match(hook, /useState<FlowNode\[\]>\(\[\]\)/));
 
-test('History starts empty', () => assert.match(hook, /Observation\[\]>>\(\{\}\)/));
-
 test(
   'No browser-made last_seen timestamp',
   () => assert.doesNotMatch(hook, /last_seen\s*:\s*new Date/)
@@ -90,13 +88,6 @@ const dialogs = fs.readFileSync('components/flow/dialogs.tsx', 'utf8');
 test(
   'Demo controls are not available',
   () => assert.doesNotMatch(dialogs, /DemoControls|Demo controls|Reference design cards/)
-);
-
-const chart = fs.readFileSync('components/flow/history-chart.tsx', 'utf8');
-
-test(
-  'Chart has no fabricated depth series',
-  () => assert.doesNotMatch(chart, /3\.42|const points=|if\(example/)
 );
 
 const cssConfig = fs.readFileSync('postcss.config.mjs', 'utf8');

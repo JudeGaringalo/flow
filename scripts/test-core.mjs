@@ -34,8 +34,7 @@ const base = {
   current_level: 0,
   quality: 'valid',
   last_seen: new Date(now).toISOString(),
-  state_version: 1,
-  is_public: true
+  state_version: 1
 };
 
 for (let mask = 0; mask < 8; mask++)
@@ -156,53 +155,6 @@ test(
   )
 );
 
-test(
-  'Notification on valid upward crossing',
-  () => assert.equal(C.shouldAlert(base, {
-    ...base,
-    probes: [true, true, false]
-  }, 2, now), true)
-);
-
-test(
-  'No notification on heartbeat',
-  () => assert.equal(C.shouldAlert(base, base, 1, now), false)
-);
-
-test(
-  'No notification on downward crossing',
-  () => assert.equal(
-    C.shouldAlert(
-      {
-        ...base,
-        probes: [true, true, true]
-      },
-      {
-        ...base,
-        probes: [true, false, false]
-      },
-      1,
-      now
-    ),
-    false
-  )
-);
-
-test(
-  'No notification for a fault',
-  () => assert.equal(C.shouldAlert(base, {
-    ...base,
-    probes: [false, true, false]
-  }, 1, now), false)
-);
-
-test('CSV prevents formula execution', () => assert.equal(C.csvCell('=SUM(A1)'), `"'=SUM(A1)"`));
-
-test(
-  'CSV quotes commas and quotation marks',
-  () => assert.equal(C.csvCell('"x",y'), '"""x"",y"')
-);
-
 test('Distance is zero at same point', () => assert.equal(C.distance(base, base), 0));
 
 test('Distance is symmetric', () => {
@@ -212,22 +164,6 @@ test('Distance is symmetric', () => {
   };
   assert.ok(Math.abs(C.distance(base, b) - C.distance(b, base)) < .001);
 });
-
-test(
-  'Missing-data summary does not imply low water',
-  () => assert.match(
-    C.summaryFor({
-      ...base,
-      last_seen: null
-    }, [], [], now),
-    /Missing data does not mean low water/
-  )
-);
-
-test(
-  'Normal summary does not claim safe road',
-  () => assert.match(C.summaryFor(base, [], [], now), /road passability are not established/)
-);
 
 test('Missing probes cannot become valid dry data', () => {
   const n = C.normalizeNode({

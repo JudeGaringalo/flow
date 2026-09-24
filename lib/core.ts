@@ -1,4 +1,4 @@
-import type { FlowNode, NodeStatus, Observation, Probes, StatusKey, Level } from './types';
+import type { FlowNode, NodeStatus, Probes, StatusKey, Level } from './types';
 
 export const STATUS: Record<StatusKey, Omit<NodeStatus, 'age'>> = {
   below: {
@@ -120,50 +120,6 @@ export function distance(
 
 export const distanceText = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 10) * 10} m`;
 
-export function summaryFor(node: FlowNode, events: Observation[], nearby: FlowNode[], now: number) {
-  const s = nodeStatus(node, now);
-  if (s.key === 'unavailable')
-    return 'This node has no current reading. Its last observation cannot confirm conditions now. Missing data does not mean low water.';
-
-  if (s.key === 'fault')
-    return 'The probe combination is inconsistent. A current flood level cannot be confirmed. Check the sensor connections before relying on its status.';
-
-  const valid = events.filter(e => e.quality === 'valid' && e.level !== null)
-    .sort((a, b) => Date.parse(a.recorded_at) - Date.parse(b.recorded_at));
-  const last = valid.at(-1), prev = valid.at(-2);
-  let text = `This monitoring point is reporting ${s.label}. `;
-  if (last?.level != null && prev?.level != null && last.level !== prev.level)
-    text += `Its latest recorded threshold transition is ${last.level > prev.level ? 'upward' : 'downward'}. `;
-  else
-    text += 'No newer threshold transition is recorded. ';
-
-  const other = nearby.find(n => nodeStatus(n, now).level !== null);
-  if (other)
-    text += `${other.name}, approximately ${distanceText(distance(node, other))} away, reports ${nodeStatus(other, now).label} at its own monitoring point. `;
-
-  text += 'Conditions between monitoring points and road passability are not established.';
-  return text;
-}
-
-export function shouldAlert(
-  previous: FlowNode | undefined,
-  node: FlowNode,
-  min: number,
-  now = Date.now()
-) {
-  const s = nodeStatus(node, now);
-  const old = previous ? levelFromProbes(previous.probes) : null;
-  return s.level !== null && s.level >= min && (old === null || s.level > old);
-}
-
-export function csvCell(value: unknown) {
-  let s = String(value ?? '');
-  if (/^[=+@\t\r-]/.test(s))
-    s = "'" + s;
-
-  return '"' + s.replace(/"/g, '""') + '"';
-}
-
 export function normalizeNode(raw: Record<string, unknown>): FlowNode {
   const validProbes = Array.isArray(raw.probes) && raw.probes.length === 3
     && raw.probes.every(p => typeof p === 'boolean');
@@ -183,7 +139,6 @@ export function normalizeNode(raw: Record<string, unknown>): FlowNode {
     last_seen: typeof raw.last_seen === 'string' ? raw.last_seen : null,
     state_version: Number(raw.state_version || 0),
     rssi: typeof raw.rssi === 'number' ? raw.rssi : null,
-    firmware: typeof raw.firmware === 'string' ? raw.firmware : null,
-    is_public: raw.is_public === true
+    firmware: typeof raw.firmware === 'string' ? raw.firmware : null
   };
 }

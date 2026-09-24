@@ -26,11 +26,8 @@ const PHILIPPINES_BOUNDS: [[number, number], [number, number]] = [
   [112, 4],
   [128, 22],
 ];
-// Open with Metro Manila visible as a whole across phone and desktop widths.
-const METRO_MANILA_BOUNDS: [[number, number], [number, number]] = [
-  [120.88, 14.33],
-  [121.17, 14.83],
-];
+// Start near the middle of NCR at a city-level zoom.
+const METRO_MANILA_CENTER: [number, number] = [121.03, 14.595];
 // Give wide screens room to show the full archipelago; the camera center is
 // constrained to PHILIPPINES_BOUNDS below.
 const MAP_LIMITS: [[number, number], [number, number]] = [
@@ -166,8 +163,8 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         library.current = lib;
         instance = new lib.Map({
           container: container.current,
-          bounds: METRO_MANILA_BOUNDS,
-          fitBoundsOptions: { padding: 32, maxZoom: 12 },
+          center: METRO_MANILA_CENTER,
+          zoom: window.innerWidth <= 760 ? 11 : 11,
           maxBounds: MAP_LIMITS,
           renderWorldCopies: false,
           transformCameraUpdate: ({ center }) => {
@@ -186,17 +183,6 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         });
         map.current = instance;
         appliedStyle.current = { basemap: initialMode, retry };
-        instance.on('click', (event) => {
-          const current = latest.current;
-          if (!current.picking) return;
-          current.setEditing({
-            ...current.picking,
-            latitude: Number(event.lngLat.lat.toFixed(6)),
-            longitude: Number(event.lngLat.lng.toFixed(6)),
-          });
-          current.setPicking(null);
-          current.setModal('node-form');
-        });
         instance.on('error', () => {
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
         });
@@ -337,7 +323,7 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
             aria-pressed={flow.selectedId === id}
             onClick={(event) => {
               event.stopPropagation();
-              if (!flow.picking) flow.selectNode(id);
+              flow.selectNode(id);
             }}
           >
             <span className="marker-label">{node.name}</span>

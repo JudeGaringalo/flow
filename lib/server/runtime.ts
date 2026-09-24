@@ -79,33 +79,15 @@ export function checkOrigin(req: Request): void {
     throw new ApiError(403, 'Origin not allowed');
 }
 
-export function bearerToken(req: Request): string {
-  const match = /^Bearer ([^\s]+)$/.exec(req.headers.get('authorization') || '');
-  if (!match || match[1].length > 8192)
+/** Sensor registration is a private operational action, not a browser account role. */
+export function requireInstallerSecret(req: Request): void {
+  const expected = process.env.FLOW_INSTALLER_SECRET?.trim() || '';
+  if (expected.length < 32)
+    throw new ApiError(503, 'Installer registration is not configured.');
+
+  const actual = req.headers.get('x-flow-installer-secret') || '';
+  if (!equalSecret(actual, expected))
     throw new ApiError(401, 'Unauthorized');
-
-  return match[1];
-}
-
-export async function requireUser(req: Request) {
-  const token = bearerToken(req);
-  const { data, error } = await getServerDb().auth.getUser(token);
-  if (error || !data.user)
-    throw new ApiError(401, 'Unauthorized');
-
-  return data.user;
-}
-
-export async function requireAdmin(req: Request) {
-  const user = await requireUser(req);
-  const { data, error } = await getServerDb().from('flow_admins').select('user_id').eq('user_id', user.id).maybeSingle();
-  if (error)
-    throw error;
-
-  if (!data)
-    throw new ApiError(403, 'An approved FLOW installer account is required.');
-
-  return user;
 }
 
 /** Cap actual bytes, not only the client-supplied Content-Length header. */
@@ -176,43 +158,4 @@ export function equalSecret(actual: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export async function takeLimit(bucket: string, limit: number, seconds = 60): Promise<boolean> {
-  const { data, error } = await getServerDb().rpc('flow_take_limit', {
-    p_bucket: bucket,
-    p_limit: limit,
-    p_seconds: seconds
-  });
-  if (error)
-    throw error;
-
-  return data === true;
-}
-
 export const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Z0-9-]{3,40}$/.test(id);
-
-export interface EvidenceNode {
-  id: string;
-  name: string;
-  current_level: number | null;
-  quality: string;
-  last_seen: string | null;
-  state_version: number;
-  is_public?: boolean;
-}
-
-export function condition(node: EvidenceNode, now = Date.now()): string {
-  const time = node.last_seen ? Date.parse(node.last_seen) : NaN;
-  if (!Number.isFinite(time) || now - time > 120000 || time - now > 30000)
-    return 'Data unavailable';
-
-  if (node.quality !== 'valid')
-    return 'Check sensor';
-
-  if (node.current_level === null || !Number.isInteger(node.current_level))
-    return 'Data unavailable';
-
-  return ['Below first threshold', 'Flood Advisory', 'Flood Watch', 'Flood Warning'][node.current_level]
-    || 'Data unavailable';
-}
-
-export const fresh = (node: EvidenceNode) => !['Data unavailable', 'Check sensor'].includes(condition(node));

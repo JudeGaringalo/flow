@@ -10,6 +10,5 @@ export const config = {
   configured: Boolean(supabaseUrl && supabaseKey),
   supabaseUrl,
   supabaseKey,
-  vapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '',
   staleAfterSeconds: 120,
 };

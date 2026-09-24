@@ -8,7 +8,7 @@ Retain the current hardware assignments:
 | Level 2 | 33 | LOW |
 | Level 3 | 25 | LOW |
 
-A `true` JSON boolean means wet. The backend, not the client/AI, recomputes the state:
+A `true` JSON boolean means wet. The backend, not the client, recomputes the state:
 
 ```text
 false false false → Below first threshold
@@ -18,7 +18,7 @@ true  true  true  → Flood Warning
 Any other combination → Sensor fault
 ```
 
-Register the node through the installer UI, then store that node's device token in its firmware/configuration. Do not put a Supabase elevated key on the ESP32.
+Register the node through the private `/api/register-node` endpoint described in `LIVE_SETUP.md`, then store that node's device token in its firmware/configuration. Do not put a Supabase elevated key or the installer secret on the ESP32.
 
 ```http
 POST https://YOUR-FLOW-SITE.vercel.app/api/ingest-reading
@@ -44,7 +44,7 @@ Debounce the raw probes before sending. Send on a stable raw-state change (inclu
 
 Use HTTPS with certificate verification. Do not use `setInsecure()` for deployment. The included cloud integration is not a substitute for validating electrical wiring, water conductivity, calibration, power isolation or weatherproofing.
 
-The current API records receipt time. Offline event buffering and strict message-order protection across rebooted devices need additional protocol work before larger deployment.
+The current API records receipt time and only the most recent message UUID. Offline event buffering and strict message-order protection across rebooted devices are not implemented.
 
 ## Test the API without the sensor
 
@@ -62,9 +62,9 @@ npm run send-reading -- 2
 npm run send-reading -- 3
 ```
 
-Confirm the node's raw state, event history and marker change. Repeat an identical message ID to verify retries do not duplicate events. Send an inconsistent combination to verify it becomes a sensor fault. Stop sending for over 120 seconds and verify the current condition becomes unavailable.
+Confirm the node's latest raw state and marker change. Repeat the most recent message ID to verify an immediate retry does not refresh the timestamp. Send an inconsistent combination to verify it becomes a sensor fault. Stop sending for over 120 seconds and verify the current condition becomes unavailable.
 
-No Wi-Fi provisioning firmware is bundled. The web application's setup instructions describe the intended local ESP32 portal flow; they do not create a captive portal themselves.
+No Wi-Fi provisioning firmware is bundled. Installing the FLOW web app on a phone does not configure an ESP32 or create a captive portal.
 
 ## Backend cutover
 
@@ -72,4 +72,4 @@ This version receives telemetry in Next.js on Vercel, not a Supabase Edge Functi
 The same per-device token and three-boolean JSON contract are retained. Update the
 firmware URL to the actual HTTPS production `/api/ingest-reading` endpoint. Never use
 the elevated Supabase server key in the ESP32. Register actual installation coordinates
-once in the installer UI. The web ZIP does not change or upload firmware automatically.
+once using the private registration endpoint. The web ZIP does not change or upload firmware automatically.

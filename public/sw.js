@@ -1,5 +1,5 @@
-/* FLOW service worker: public app shell and Web Push only. Never cache telemetry/API data. */
-const CACHE = 'flow-next-shell-live-v5';
+/* FLOW service worker: public app shell only. Never cache telemetry/API data. */
+const CACHE = 'flow-next-shell-live-v6';
 
 const OFFLINE = '/offline.html';
 
@@ -7,7 +7,6 @@ const STATIC = [
   '/assets/icon-192.png',
   '/assets/icon-512.png',
   '/assets/flow-wordmark.png',
-  '/assets/flow-intelligence.png',
   OFFLINE
 ];
 
@@ -68,62 +67,3 @@ self.addEventListener('fetch', event => {
   }
 });
 
-self.addEventListener('push', event => {
-  let p = {
-    title: 'F.L.O.W. observation update',
-    body: 'Open the map to check the latest sensor observations.'
-  };
-  try {
-    Object.assign(p, event.data?.json() || {});
-  }
-  catch { }
-
-  const url = new URL('/', self.location.origin);
-  if (typeof p.node_id === 'string' && /^[A-Z0-9-]{3,40}$/.test(p.node_id))
-    url.hash = 'node=' + encodeURIComponent(p.node_id);
-
-  const time = p.recorded_at ? Date.parse(p.recorded_at) : Date.now();
-  event.waitUntil(
-    self.registration.showNotification(String(p.title).slice(0, 120), {
-      body: String(p.body).slice(0, 300),
-      icon: '/assets/icon-192.png',
-      badge: '/assets/icon-192.png',
-      tag: p.node_id ? 'flow-' + p.node_id : 'flow-update',
-      renotify: true,
-      data: { url: url.href },
-      timestamp: Number.isFinite(time) ? time : Date.now()
-    })
-  );
-});
-
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  let target;
-  try {
-    target = new URL(event.notification.data?.url || '/', self.location.origin);
-  }
-  catch {
-    target = new URL('/', self.location.origin);
-  }
-
-  if (target.origin !== self.location.origin)
-    target = new URL('/', self.location.origin);
-
-  event.waitUntil(
-    self.clients.matchAll({
-      type: 'window',
-      includeUncontrolled: true
-    })
-      .then(
-        async (windows) => {
-          const client = windows.find(w => new URL(w.url).origin === target.origin);
-          if (client) {
-            await client.navigate(target.href);
-            return client.focus();
-          }
-
-          return self.clients.openWindow(target.href);
-        }
-      )
-  );
-});

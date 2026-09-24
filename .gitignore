@@ -3,7 +3,6 @@ node_modules/
 out/
 .env*
 !.env.example
-!supabase/.env.example
 *.tsbuildinfo
 .vercel/
 .DS_Store
