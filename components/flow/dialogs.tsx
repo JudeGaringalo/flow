@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFlow } from '@/hooks/use-flow';
 import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS } from '@/lib/core';
@@ -46,16 +46,7 @@ export function Dialogs({ mapRef }: { mapRef: React.RefObject<MapHandle | null> 
 
 function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<MapHandle | null> }) {
   const f = useFlow();
-  if (kind === 'menu') return (
-    <div className="menu-list">
-      <button type="button" onClick={() => f.setModal('install')}>
-        <Icon name="download" />Install FLOW<Icon name="chevron" />
-      </button>
-      <button type="button" onClick={() => f.setModal('about')}>
-        <Icon name="info" />About observations<Icon name="chevron" />
-      </button>
-    </div>
-  );
+  if (kind === 'menu') return <Menu />;
   if (kind === 'layers') return (
     <>
       <p>Choose a map view. Street and place labels use the same source in every view.</p>
@@ -102,6 +93,21 @@ function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<Ma
   );
 }
 
+function Menu() {
+  const f = useFlow();
+  const installed = useInstalledApp();
+  return (
+    <div className="menu-list">
+      {!installed && <button type="button" onClick={() => f.setModal('install')}>
+        <Icon name="download" />Install FLOW<Icon name="chevron" />
+      </button>}
+      <button type="button" onClick={() => f.setModal('about')}>
+        <Icon name="info" />About observations<Icon name="chevron" />
+      </button>
+    </div>
+  );
+}
+
 function Note({ children }: { children: ReactNode }) {
   return <div className="note">{children}</div>;
 }
@@ -134,11 +140,59 @@ interface InstallPrompt extends Event {
   userChoice: Promise<{ outcome: string }>;
 }
 let installEvent: InstallPrompt | null = null;
+const INSTALL_PROMPT_CHANGED = 'flow-install-prompt-changed';
+
+function setInstallEvent(event: InstallPrompt | null) {
+  installEvent = event;
+  window.dispatchEvent(new Event(INSTALL_PROMPT_CHANGED));
+}
+
+interface InstallNavigator extends Navigator {
+  standalone?: boolean;
+  getInstalledRelatedApps?: () => Promise<Array<{ platform: string }>>;
+}
+
+function useInstalledApp() {
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    const check = async () => {
+      const current = ++request;
+      const browser = navigator as InstallNavigator;
+      if (window.matchMedia('(display-mode: standalone)').matches || browser.standalone) {
+        if (active) setInstalled(true);
+        return;
+      }
+      try {
+        const apps = await browser.getInstalledRelatedApps?.();
+        if (active && current === request) setInstalled(apps?.some(app => app.platform === 'webapp') ?? false);
+      } catch {
+        if (active && current === request) setInstalled(false);
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') void check(); };
+    const onInstalled = () => { request++; setInstalled(true); };
+    void check();
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
+
+  return installed;
+}
 
 export function PwaRegistration() {
   useEffect(() => {
-    const capture = (event: Event) => { event.preventDefault(); installEvent = event as InstallPrompt; };
-    const installed = () => { installEvent = null; };
+    const capture = (event: Event) => { event.preventDefault(); setInstallEvent(event as InstallPrompt); };
+    const installed = () => { setInstallEvent(null); };
     window.addEventListener('beforeinstallprompt', capture);
     window.addEventListener('appinstalled', installed);
     if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -168,34 +222,56 @@ export function PwaRegistration() {
 
 function InstallHelp() {
   const f = useFlow();
+  const installed = useInstalledApp();
+  const [canPrompt, setCanPrompt] = useState(false);
+  const [platform, setPlatform] = useState<'ios' | 'android' | 'other' | null>(null);
+
+  useEffect(() => {
+    const update = () => setCanPrompt(installEvent !== null);
+    update();
+    window.addEventListener(INSTALL_PROMPT_CHANGED, update);
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    setPlatform(ios ? 'ios' : /Android/i.test(navigator.userAgent) ? 'android' : 'other');
+    return () => window.removeEventListener(INSTALL_PROMPT_CHANGED, update);
+  }, []);
+
+  if (installed) return <p>FLOW is already installed on this device. Open it from your apps.</p>;
+
   return (
     <>
       <p>Install this web app on your Home Screen to open the same public monitoring map.</p>
       <ol className="setup-steps">
-        <li><strong>iPhone/iPad:</strong> Share → Add to Home Screen, then open FLOW from the icon.</li>
+        <li><strong>iPhone/iPad:</strong> In Safari, Share → Add to Home Screen, then open FLOW from the icon.</li>
         <li><strong>Android:</strong> Browser menu → Install app or Add to Home Screen.</li>
         <li><strong>Desktop:</strong> Use the browser&apos;s install icon when available.</li>
       </ol>
+      {!canPrompt && platform === 'android' &&
+        <Note>If you just uninstalled FLOW, refresh this tab to let your browser check again. If it still offers to open the installed app, check Settings → Apps → FLOW → Uninstall. You do not need to clear browser data.</Note>}
+      {platform === 'ios' &&
+        <Note>If you removed FLOW from the Home Screen but did not delete it, check App Library and choose Delete App before adding it again.</Note>}
+      {!canPrompt && platform === 'other' &&
+        <Note>If you just uninstalled FLOW, refresh this tab to let your browser check again.</Note>}
       <Note>Offline pages cannot report current flood conditions. Reconnect to see the latest sensor readings.</Note>
-      <button className="primary-btn full" onClick={async () => {
+      {platform && platform !== 'ios' && <button className="primary-btn full" onClick={async () => {
         const prompt = installEvent;
-        installEvent = null;
         if (!prompt) {
-          f.notify('Use your browser’s Install app or Add to Home Screen option.');
+          window.location.reload();
           return;
         }
+        setInstallEvent(null);
         try {
           await prompt.prompt();
           const choice = await prompt.userChoice;
           if (choice.outcome === 'dismissed') {
-            f.notify('Installation cancelled. Reload the page before trying again.');
+            f.notify('Installation cancelled. Refresh the page before trying again.');
           }
         } catch {
-          f.notify('Install prompt unavailable. Reload the page and use your browser’s install menu.', true);
+          f.notify('Install prompt unavailable. Refresh the page and use your browser’s install menu.', true);
         }
       }}>
-        <Icon name="download" />Install FLOW
-      </button>
+        <Icon name="download" />{canPrompt ? 'Install FLOW' : 'Refresh install options'}
+      </button>}
     </>
   );
 }
