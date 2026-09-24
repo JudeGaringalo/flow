@@ -2,19 +2,16 @@
 
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
 import { useFlow } from '@/hooks/use-flow';
-import { config } from '@/lib/config';
 import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS, clock } from '@/lib/core';
 import { enablePush, disablePush } from '@/lib/push';
 import * as api from '@/lib/supabase';
-import type { IconName } from './icon';
 import { Icon } from './icon';
 import type { MapHandle, ModalKind, NodeInput, StatusKey } from '@/lib/types';
 
 const TITLES: Record<ModalKind, string> = {
-  menu: 'FLOW, your way',
+  menu: 'FLOW',
   layers: 'Map layers',
-  settings: 'Settings & connection',
   about: 'About observations',
   install: 'Install FLOW',
   directions: 'Open directions',
@@ -67,7 +64,6 @@ export function Dialogs({ mapRef }: {
     >
       <div className="dialog-head">
         <div>
-          <span className="eyebrow">FLOOD-LEVEL OBSERVATION & WARNING</span>
           <h2 id="dialog-title">{f.modal ? TITLES[f.modal] : ''}</h2>
         </div>
         <button
@@ -97,45 +93,16 @@ function Content({ kind, mapRef }: {
   if (kind === 'menu')
     return (
       <div className="menu-list">
-        {([
-          [
-            'list',
-            'Monitored locations',
-            () => {
-              f.setView('all');
-              f.setListOpen(true);
-              f.setModal(null);
-            }
-          ],
-          [
-            'bookmark',
-            'Saved locations',
-            () => {
-              f.setView('saved');
-              f.setListOpen(true);
-              f.setModal(null);
-            }
-          ],
-          ['settings', 'Settings & connection', () => f.setModal('settings')],
-          ['lock', 'Node administration', () => f.setModal('admin')],
-          ['download', 'Install FLOW', () => f.setModal('install')],
-          ['info', 'About observations', () => f.setModal('about')]
-        ] as [
-          IconName,
-          string,
-          () => void
-        ][]).map(
-          ([icon, label, action]) => (
-            <button
-              key={label}
-              onClick={action}
-            >
-              <Icon name={icon} />
-              {label}
-              <Icon name="chevron" />
-            </button>
-
-          ))}
+        <button type="button" onClick={() => f.setModal('install')}>
+          <Icon name="download" />
+          Install FLOW
+          <Icon name="chevron" />
+        </button>
+        <button type="button" onClick={() => f.setModal('about')}>
+          <Icon name="info" />
+          About observations
+          <Icon name="chevron" />
+        </button>
       </div>
     );
 
@@ -197,7 +164,7 @@ function Content({ kind, mapRef }: {
         >
           <Icon name="expand" />
           {' '}
-          Fit visible nodes
+          {f.visibleNodes.length ? 'Fit visible nodes' : 'Show Philippines'}
         </button>
       </>
     );
@@ -214,9 +181,6 @@ function Content({ kind, mapRef }: {
 
   if (kind === 'node-form')
     return <NodeForm />;
-
-  if (kind === 'settings')
-    return <Settings />;
 
   if (kind === 'token')
     return (
@@ -382,9 +346,8 @@ function Content({ kind, mapRef }: {
       </p>
       <p className="map-data-credit">
         Streets and labels: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors.
-        Satellite imagery: Esri and its imagery contributors. Terrain elevation:
-        Mapzen / Tilezen, USGS, NOAA and other source contributors. Source credits
-        are also available in the small credit line on the map.
+        Satellite imagery: Esri and its imagery contributors. Source credits are
+        also available in the small credit line on the map.
       </p>
     </>
   );
@@ -395,111 +358,6 @@ function Note({ children }: {
 }) {
   return (
     <div className="note">{children}</div>
-  );
-}
-
-function Toggle({ label, description, checked, onChange }: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <div className="settings-row">
-      <div>
-        <h3>{label}</h3>
-        <p>{description}</p>
-      </div>
-      <button
-        className="toggle"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={onChange}
-      />
-    </div>
-  );
-}
-
-function Settings() {
-  const f = useFlow();
-  const [busy, setBusy] = useState(false);
-
-  return (
-    <>
-      <Toggle
-        label="Light appearance"
-        description="Applies to the interface and map."
-        checked={f.theme === 'light'}
-        onChange={() => f.setTheme(f.theme === 'light' ? 'dark' : 'light')}
-      />
-      <dl>
-        {[
-          ['App mode', 'Live only'],
-          [
-            'Data connection',
-            config.configured
-              ? (f.offline ? 'Unavailable' : f.connection)
-              : 'Not configured'
-          ],
-          ['Supabase', config.supabaseUrl || 'Not configured'],
-          ['Map mode', config.mapMode],
-          ['Stale after', '120 seconds without a fresh report']
-        ].map(
-          ([key, value]) => (
-            <div
-              className="keyvalue"
-              key={key}
-            >
-              <dt>{key}</dt>
-              <dd>{value}</dd>
-            </div>
-
-          ))}
-      </dl>
-      {f.connectionError && (
-        <p
-          className="error-text"
-          role="alert"
-        >
-          {f.connectionError}
-        </p>
-      )}
-      <p className="note">
-        Production connection values are set in your Vercel environment variables.
-        Gemini and privileged database keys remain in private server environment
-        variables.
-      </p>
-      {<button
-        className="secondary-btn full"
-        onClick={() => void f.refreshLive()}
-      >
-        <Icon name="refresh" />
-        {' '}
-        Refresh live observations
-      </button>}
-      <button
-        className="text-btn spaced"
-        disabled={busy}
-        onClick={
-          async () => {
-            setBusy(true);
-            try {
-              await disablePush();
-              f.notify('Browser push subscription removed.');
-            }
-            catch (e) {
-              f.notify(e instanceof Error ? e.message : 'Could not unsubscribe.', true);
-            }
-            finally {
-              setBusy(false);
-            }
-          }
-        }
-      >
-        Disable this browser&apos;s background push
-      </button>
-    </>
   );
 }
 
@@ -658,6 +516,7 @@ function FollowForm() {
 
 function Alerts() {
   const f = useFlow();
+  const [pushBusy, setPushBusy] = useState(false);
 
   useEffect(() => {
     f.setActivity(a => a.map(i => ({
@@ -745,6 +604,25 @@ function Alerts() {
             Clear local activity
           </button>
         )}
+      <button
+        className="text-btn spaced"
+        disabled={pushBusy}
+        onClick={async () => {
+          setPushBusy(true);
+          try {
+            await disablePush();
+            f.notify('Browser push subscription removed.');
+          }
+          catch (error) {
+            f.notify(error instanceof Error ? error.message : 'Could not unsubscribe.', true);
+          }
+          finally {
+            setPushBusy(false);
+          }
+        }}
+      >
+        Disable browser push notifications
+      </button>
     </>
   );
 }

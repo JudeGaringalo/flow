@@ -98,14 +98,6 @@ export function NodeDetails() {
         <div className="detail-title-row">
           <h2 id="detail-location-title">{node.name}</h2>
           <button
-            className={'icon-btn' + (f.saved.includes(node.id) ? ' is-saved' : '')}
-            aria-label={f.saved.includes(node.id) ? 'Unsave location' : 'Save location'}
-            aria-pressed={f.saved.includes(node.id)}
-            onClick={() => f.toggleSaved(node.id)}
-          >
-            <Icon name="bookmark" />
-          </button>
-          <button
             className="icon-btn"
             aria-label="Close location details"
             onClick={f.closeDetails}

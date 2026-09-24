@@ -24,8 +24,7 @@ import type {
   ModalKind,
   NodeInput,
   Observation,
-  StatusKey,
-  Theme
+  StatusKey
 } from '@/lib/types';
 
 type Toast = {
@@ -34,7 +33,7 @@ type Toast = {
   error: boolean;
 };
 
-// Versioned and project-scoped: old demo bookmarks/activity cannot bleed into live state.
+// Versioned and project-scoped: old demo activity cannot bleed into live state.
 const storageKey = `flow-next:live-only:v1:${encodeURIComponent(config.supabaseUrl)}:`;
 
 function readStore<T>(key: string, fallback: T): T {
@@ -66,13 +65,9 @@ function useFlowController() {
   const [range, setRange] = useState(24),
     [query, setQuery] = useState(''),
     [filter, setFilter] = useState<StatusKey | 'all' | 'online'>('all');
-  const [view, setView] = useState<'all' | 'saved'>('all'),
-    [listOpen, setListOpen] = useState(false);
   const [expanded, setExpanded] = useState(false),
-    [theme, setTheme] = useState<Theme>('light'),
     [basemap, setBasemap] = useState<Basemap>('standard');
-  const [saved, setSaved] = useState<string[]>([]),
-    [follows, setFollows] = useState<Record<string, Follow>>({});
+  const [follows, setFollows] = useState<Record<string, Follow>>({});
   const [activity, setActivity] = useState<Activity[]>([]),
     [toasts, setToasts] = useState<Toast[]>([]);
   const [modal, setModal] = useState<ModalKind | null>(null),
@@ -178,12 +173,12 @@ function useFlowController() {
       mounted.current = true;
       setNow(Date.now());
       setOnline(navigator.onLine);
-      setTheme(readStore<Theme>('theme', 'light'));
       const storedBasemap = readStore<unknown>('basemap', 'standard');
       setBasemap(isBasemap(storedBasemap) ? storedBasemap : 'standard');
-      setSaved(readStore<string[]>('saved', []));
       // Do not import previous-version activity, example summaries or cached nodes.
       try {
+        localStorage.removeItem(storageKey + 'saved');
+        localStorage.removeItem(storageKey + 'theme');
         const obsolete = Object.keys(localStorage)
           .filter(
             k => k.startsWith('flow-next:demo:') || k.startsWith('flow-v2:demo:')
@@ -220,28 +215,6 @@ function useFlowController() {
     },
     []
   );
-
-  useEffect(
-    () => {
-      if (!ready)
-        return;
-
-      document.body.classList.toggle('light', theme === 'light');
-      document.documentElement.style.colorScheme = theme;
-      document.querySelector('meta[name="theme-color"]')
-        ?.setAttribute(
-          'content',
-          theme === 'light' ? '#ffffff' : '#101d2c'
-        );
-      writeStore('theme', theme);
-    },
-    [ready, theme]
-  );
-
-  useEffect(() => {
-    if (ready)
-      writeStore('saved', saved);
-  }, [ready, saved]);
 
   useEffect(() => {
     if (ready)
@@ -375,12 +348,11 @@ function useFlowController() {
     () => nodes.filter(
       n => {
         const s = getStatus(n);
-        return (view !== 'saved' || saved.includes(n.id))
-          && (!query || `${n.name} ${n.area} ${n.id}`.toLowerCase().includes(query.toLowerCase()))
+        return (!query || `${n.name} ${n.area} ${n.id}`.toLowerCase().includes(query.toLowerCase()))
           && (filter === 'all' || (filter === 'online' ? s.level !== null : s.key === filter));
       }
     ),
-    [nodes, getStatus, view, saved, query, filter]
+    [nodes, getStatus, query, filter]
   );
   const nearby = useMemo(
     () => selected
@@ -405,7 +377,6 @@ function useFlowController() {
     setSelectedId(id);
     setTab('overview');
     setExpanded(false);
-    setListOpen(false);
     setModal(null);
     const url = new URL(location.href);
     url.hash = 'node=' + encodeURIComponent(id);
@@ -418,10 +389,6 @@ function useFlowController() {
     const url = new URL(location.href);
     url.hash = '';
     history.replaceState(null, '', url);
-  }
-
-  function toggleSaved(id: string) {
-    setSaved(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
   }
 
   async function follow(id: string, min: 1 | 2 | 3 | null) {
@@ -437,9 +404,6 @@ function useFlowController() {
         return next;
       }
     );
-    if (min !== null)
-      setSaved(s => s.includes(id) ? s : [...s, id]);
-
     notify(
       min === null
         ? 'Location alerts stopped.'
@@ -491,18 +455,10 @@ function useFlowController() {
     setQuery,
     filter,
     setFilter,
-    view,
-    setView,
-    listOpen,
-    setListOpen,
     expanded,
     setExpanded,
-    theme,
-    setTheme,
     basemap,
     setBasemap,
-    saved,
-    toggleSaved,
     follows,
     follow,
     activity,

@@ -4,7 +4,7 @@ import './globals.css';
 import './reference-ui.css';
 
 export const metadata: Metadata = {
-  title: 'FLOW — Flood-Level Observation & Warning',
+  title: 'FLOW',
   description: 'A map-first view of monitored flood conditions, with sensor history and FLOW Intelligence.',
   applicationName: 'FLOW',
   manifest: '/manifest.webmanifest',
@@ -31,7 +31,7 @@ export default function RootLayout({ children }: {
 }) {
   return (
     <html lang="en">
-      <body className="light">{children}</body>
+      <body className="light" suppressHydrationWarning>{children}</body>
     </html>
   );
 }

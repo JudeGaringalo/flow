@@ -1,6 +1,4 @@
-export type Theme = 'light' | 'dark';
-
-export type Basemap = 'standard' | 'terrain' | 'satellite' | 'dark';
+export type Basemap = 'standard' | 'satellite';
 
 export type Level = 0 | 1 | 2 | 3;
 
@@ -82,13 +80,13 @@ export interface NodeInput {
 export interface MapHandle {
   focus: (id: string) => void;
   fit: () => void;
+  showPhilippines: () => void;
   zoomBy: (delta: number) => void;
-  locate: (latitude: number, longitude: number, accuracy: number) => void;
+  locate: (latitude: number, longitude: number, accuracy: number) => boolean;
 }
 
 export type ModalKind = 'menu'
   | 'layers'
-  | 'settings'
   | 'about'
   | 'install'
   | 'directions'

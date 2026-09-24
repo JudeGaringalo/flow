@@ -108,9 +108,13 @@ created by merely copying the files or setting `NEXT_PUBLIC_FLOW_MODE`.
 
 ## 5. Register and connect hardware
 
-Open Menu > Node administration, sign in with the approved installer account, and
-register the actual fixed coordinates. Save the generated per-device token when it
-is shown. New nodes stay unavailable until a genuine reading arrives.
+The public menu now contains only Install FLOW and About observations. Node
+administration is no longer linked there. Approved installers can still register,
+edit, or rotate nodes through an authorized client calling `POST /api/register-node`
+with a signed-in installer access token. If you need the former in-app installer
+screen, give it a protected entry point before adding hardware. Register the actual
+fixed coordinates and save the generated per-device token when it is returned. New
+nodes stay unavailable until a genuine reading arrives.
 
 Change the ESP32 endpoint to:
 

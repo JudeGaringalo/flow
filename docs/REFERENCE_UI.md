@@ -10,7 +10,7 @@ See README-FIRST.md in the patch for installation and validation limitations.
 - `components/flow/history-chart.tsx`: discrete threshold chart, range labels, no forecast extrapolation.
 - `components/flow/map-canvas.tsx`: MapLibre lifecycle, React marker portals and unobtrusive credits.
 - `components/flow/dialogs.tsx`: basemap chooser, provider credits and safe development SW behavior.
-- `lib/map-styles.ts`: one shared vector label source, raster imagery underneath, real DEM hillshade.
+- `lib/map-styles.ts`: one shared vector label source, with optional satellite imagery underneath.
 - `app/reference-ui.css`: isolated reference-specific styling imported after existing global styles.
 
 ## Behavioral boundaries
@@ -28,9 +28,6 @@ proof of uninterrupted sensor observation.
 
 - https://openfreemap.org/quick_start/
 - https://maplibre.org/maplibre-gl-js/docs/API/type-aliases/TransformStyleFunction/
-- https://maplibre.org/maplibre-gl-js/docs/examples/add-a-hillshade-layer/
-- https://registry.opendata.aws/terrain-tiles/
-- https://github.com/tilezen/joerd/blob/master/docs/attribution.md
 - https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9
 - https://osmfoundation.org/wiki/Licence/Attribution_Guidelines
 

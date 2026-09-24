@@ -35,7 +35,7 @@ let count = 0;
 const test = (label, run) => { run(); count++; console.log('PASS', label); };
 const original = JSON.stringify(sample);
 
-for (const mode of ['standard', 'terrain', 'satellite', 'dark']) {
+for (const mode of ['standard', 'satellite']) {
   const style = composeBasemap(sample, mode);
   test(`${mode} retains the same road-name expression and placement`, () => {
     const label = style.layers.find((layer) => layer.id === 'roads-label');
@@ -43,9 +43,9 @@ for (const mode of ['standard', 'terrain', 'satellite', 'dark']) {
     assert.equal(label.minzoom, 12);
     assert.equal(label.source, 'openmaptiles');
   });
-  test(`${mode} keeps labels above base imagery or terrain`, () => {
+  test(`${mode} keeps labels above base imagery`, () => {
     const labelIndex = style.layers.findIndex((layer) => layer.type === 'symbol');
-    const baseIndex = style.layers.findIndex((layer) => ['raster', 'hillshade'].includes(layer.type));
+    const baseIndex = style.layers.findIndex((layer) => layer.type === 'raster');
     assert.ok(baseIndex < labelIndex);
   });
   test(`${mode} has unique layer IDs`, () => {
@@ -59,27 +59,17 @@ test('Satellite includes imagery and vector labels, but not an opaque vector bac
   assert.ok(style.layers.some((layer) => layer.type === 'symbol'));
   assert.ok(!style.layers.some((layer) => ['background', 'fill'].includes(layer.type)));
 });
-test('Terrain uses elevation data, not a separately labeled raster street map', () => {
-  const style = composeBasemap(sample, 'terrain');
-  assert.equal(style.sources['flow-elevation'].type, 'raster-dem');
-  assert.equal(style.sources['flow-elevation'].encoding, 'terrarium');
-  assert.ok(style.layers.some((layer) => layer.type === 'hillshade'));
-  assert.ok(!style.layers.some((layer) => layer.type === 'raster'));
-});
-test('Invalid saved map names are rejected', () => {
+test('Removed and invalid map names are rejected', () => {
   assert.equal(isBasemap('satellite'), true);
-  for (const invalid of ['legacy', 'prototype', null, {}, 42]) assert.equal(isBasemap(invalid), false);
+  for (const invalid of ['terrain', 'dark', 'legacy', 'prototype', null, {}, 42]) {
+    assert.equal(isBasemap(invalid), false);
+  }
 });
 test('Map code cannot create demo observations', () => {
   const map = fs.readFileSync('components/flow/map-canvas.tsx', 'utf8');
   assert.ok(map.includes('flow.visibleNodes'));
   assert.ok(!map.includes('seed('));
   assert.ok(!map.includes('_designLevel'));
-});
-test('Navigation labels use text spans to avoid whitespace-only JSX mismatch', () => {
-  const app = fs.readFileSync('components/flow/flow-app.tsx', 'utf8');
-  assert.ok(app.includes('<span>Live map</span>'));
-  assert.ok(app.includes('<span>Saved locations</span>'));
 });
 test('Worker does not serve Next.js bundles from its cache', () => {
   const worker = fs.readFileSync('public/sw.js', 'utf8');

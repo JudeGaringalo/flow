@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import Image from 'next/image';
 import { FlowProvider, useFlow } from '@/hooks/use-flow';
 import { config } from '@/lib/config';
@@ -11,6 +12,7 @@ import { NodeDetails } from './node-details';
 import { Dialogs, PwaRegistration } from './dialogs';
 
 export default function FlowApp() {
+  ReactDOM.preconnect('https://tiles.openfreemap.org', { crossOrigin: 'anonymous' });
   return (
     <FlowProvider>
       <Workspace />
@@ -41,7 +43,6 @@ function Workspace() {
 
         if (event.key === 'Escape' && !f.modal) {
           setSearchOpen(false);
-          f.setListOpen(false);
           if (f.picking)
             f.setPicking(null);
           else
@@ -60,17 +61,10 @@ function Workspace() {
 
   function home() {
     f.closeDetails();
-    f.setView('all');
     f.setFilter('all');
     f.setQuery('');
-    f.setListOpen(false);
     setSearchOpen(false);
-    mapRef.current?.fit();
-  }
-
-  function showList(saved = false) {
-    f.setView(saved ? 'saved' : 'all');
-    f.setListOpen(true);
+    mapRef.current?.showPhilippines();
   }
 
   function locate() {
@@ -81,10 +75,10 @@ function Workspace() {
 
     navigator.geolocation.getCurrentPosition(
       p => {
-        mapRef.current?.locate(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
-        f.notify(
-          `Map centered on your location (reported accuracy ±${Math.round(p.coords.accuracy)} m).`
-        );
+        const located = mapRef.current?.locate(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
+        if (!located) {
+          f.notify('Your location is outside the Philippines map view, or the map is still loading.', true);
+        }
       },
       () => f.notify('Location was unavailable. Allow access or search for a monitored location.', true),
       {
@@ -127,50 +121,15 @@ function Workspace() {
           title="FLOW menu"
         >
           <Image
-            src="/assets/flow-wordmark.png"
+            src="/assets/flow-wordmark.svg"
             alt="FLOW"
-            width={105}
-            height={25}
+            width={97}
+            height={23}
             priority
           />
           <span>FLOOD-LEVEL OBSERVATION &amp; WARNING</span>
         </button>
-        <nav
-          className="header-nav"
-          aria-label="Map navigation"
-        >
-          <button
-            className={'nav-btn' + (f.view === 'all' ? ' active' : '')}
-            onClick={() => showList()}
-          >
-            <Icon name="map" />
-            <span>Live map</span>
-          </button>
-          <button
-            className={'nav-btn' + (f.view === 'saved' ? ' active' : '')}
-            onClick={() => showList(true)}
-          >
-            <Icon name="bookmark" />
-            <span>Saved locations</span>
-            <span className="nav-count">{f.saved.length}</span>
-          </button>
-        </nav>
         <div className="header-actions">
-          <button
-            className="icon-btn"
-            aria-label={f.theme === 'light'
-              ? 'Switch to dark appearance'
-              : 'Switch to light appearance'}
-            onClick={() => {
-              const next = f.theme === 'light' ? 'dark' : 'light';
-              f.setTheme(next);
-              if (f.basemap === 'standard' || f.basemap === 'dark') {
-                f.setBasemap(next === 'dark' ? 'dark' : 'standard');
-              }
-            }}
-          >
-            <Icon name={f.theme === 'light' ? 'moon' : 'sun'} />
-          </button>
           <button
             className="icon-btn"
             aria-label="Open notifications"
@@ -283,15 +242,6 @@ function Workspace() {
                 </div>
               )}
           </div>
-          <button
-            className="mobile-locations"
-            onClick={() => f.setListOpen(!f.listOpen)}
-            aria-label="Browse monitoring locations"
-          >
-            <Icon name="list" />
-            {' '}
-            Locations
-          </button>
           {(f.offline || f.picking)
             && (
               <div
@@ -342,7 +292,7 @@ function Workspace() {
             </div>
             <button
               className="map-btn fit-control"
-              aria-label="Fit all monitoring points"
+              aria-label={f.visibleNodes.length ? 'Fit all monitoring points' : 'Show Philippines'}
               onClick={() => mapRef.current?.fit()}
             >
               <Icon name="expand" />
@@ -369,7 +319,6 @@ function Workspace() {
               {statusLabel}
             </span>
           </div>
-          <LocationsList />
           <NodeDetails />
         </div>
       </main>
@@ -407,171 +356,5 @@ function Workspace() {
           </div>
         )}
     </>
-  );
-}
-
-function LocationsList() {
-  const f = useFlow();
-  const count = (key: string) => f.nodes.filter(
-    n => key === 'online'
-      ? f.getStatus(n).level !== null
-      : f.getStatus(n).key === key
-  ).length;
-
-  return (
-    <aside
-      className={'sidebar' + (f.listOpen ? ' mobile-open' : '')}
-      aria-label="Monitoring locations"
-      inert={!f.listOpen}
-    >
-      <div className="sidebar-heading">
-        <div>
-          <span className="eyebrow">THE FLOW NETWORK</span>
-          <h1>{f.view === 'saved' ? 'Saved locations' : 'Monitored locations'}</h1>
-        </div>
-        <button
-          className="icon-btn"
-          aria-label="Close locations"
-          onClick={() => f.setListOpen(false)}
-        >
-          <Icon name="x" />
-        </button>
-      </div>
-
-      <div className="mobile-map-tabs">
-        <button
-          className={'chip' + (f.view === 'all' ? ' active' : '')}
-          onClick={() => f.setView('all')}
-        >
-          All locations
-        </button>
-        <button
-          className={'chip' + (f.view === 'saved' ? ' active' : '')}
-          onClick={() => f.setView('saved')}
-        >
-          Saved ·
-          {' '}
-          {f.saved.length}
-        </button>
-      </div>
-        
-      <div className="sidebar-body">
-        <div className="network-overview">
-          <div>
-            <span className="overview-label">Network overview</span>
-            <span className="subtle">
-              {f.nodes.length}
-              {' '}
-              nodes
-            </span>
-          </div>
-          <div className="metric-row">
-            {(['warning', 'watch', 'online'] as const).map(
-              key => (
-                <button
-                  className="metric"
-                  key={key}
-                  onClick={() => f.setFilter(key)}
-                >
-                  <span className={'metric-number ' + key + '-text'}>{count(key)}</span>
-                  <span>
-                    {key === 'warning' ? 'Warning+' : key === 'watch' ? 'Watch' : 'Reporting'}
-                  </span>
-                </button>
-
-              ))}
-          </div>
-        </div>
-        <div className="list-toolbar">
-          <h2>
-            {f.visibleNodes.length}
-            {' '}
-            locations
-          </h2>
-          <button
-            className="text-btn"
-            onClick={() => {
-              f.setQuery('');
-              f.setFilter('all');
-            }}
-          >
-            Clear filters
-          </button>
-        </div>
-        <div className="filter-bar">
-          {(['all', 'advisory', 'watch', 'warning', 'unavailable'] as const).map(
-            key => (
-              <button
-                key={key}
-                className={'chip' + (f.filter === key ? ' active' : '')}
-                onClick={() => f.setFilter(key)}
-              >
-                {key === 'all'
-                  ? 'All'
-                  : key === 'unavailable' ? 'Unavailable' : key[0].toUpperCase() + key.slice(1)}
-              </button>
-
-            ))}
-        </div>
-        <div className="location-list">
-          {f.visibleNodes.length
-            ? f.visibleNodes.map(
-              n => (
-                <article
-                  className={'node-card' + (n.id === f.selectedId ? ' selected' : '')}
-                  key={n.id}
-                >
-                  <button
-                    className="node-select"
-                    onClick={() => f.selectNode(n.id)}
-                  >
-                    <h3>{n.name}</h3>
-                    <p>{n.area}</p>
-                    <div className="node-meta">
-                      <span
-                        className="status-label"
-                        style={{ '--status-color': f.getStatus(n).color } as CSSProperties}
-                      >
-                        {f.getStatus(n).short}
-                      </span>
-                      <span>{f.age(n)}</span>
-                    </div>
-                  </button>
-                  <button
-                    className={'node-save' + (f.saved.includes(n.id) ? ' is-saved' : '')}
-                    aria-label={`${f.saved.includes(n.id) ? 'Unsave' : 'Save'} ${n.name}`}
-                    aria-pressed={f.saved.includes(n.id)}
-                    onClick={() => f.toggleSaved(n.id)}
-                  >
-                    <Icon name="bookmark" />
-                  </button>
-                </article>
-
-              ))
-            : (
-              <div className="empty-state">
-                <Icon name="search" />
-                <h3>{!f.nodes.length ? 'No sensors yet' : 'No matching locations'}</h3>
-                <p>
-                  {!f.nodes.length
-                    ? (config.configured
-                      ? 'No sensors registered yet. An authorized installer can add the first node.'
-                      : 'Connect Supabase to register your first sensor. The map has no observations yet.')
-                    : 'Save a location or clear the filters to see more monitoring points.'}
-                </p>
-              </div>
-            )}
-        </div>
-      </div>
-      
-      <div className="sidebar-footer">
-        <Icon name="shield" />
-        <p>
-          Observations apply at each sensor.
-          <br />
-          <span>Not official warnings or road-passability advice.</span>
-        </p>
-      </div>
-    </aside>
   );
 }

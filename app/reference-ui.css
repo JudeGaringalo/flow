@@ -73,6 +73,7 @@ input:focus-visible {
   align-items: flex-start;
   justify-content: center;
   gap: 5px;
+  width: max-content;
   min-width: 0;
   padding: 0;
   background: transparent;
@@ -83,8 +84,8 @@ input:focus-visible {
 
 .brand img,
 .light .brand img {
-  width: 105px;
-  height: 25px;
+  width: 100%;
+  height: auto;
   object-fit: contain;
   background: transparent;
   border-radius: 0;
@@ -440,8 +441,7 @@ body:not(.light) .brand img {
   right: calc(var(--sheet-width) + 46px);
 }
 
-.map-provider-notice,
-.map-loading {
+.map-provider-notice {
   position: absolute;
   top: 80px;
   left: 27px;
@@ -466,34 +466,6 @@ body:not(.light) .brand img {
   background: none;
 }
 
-.map-loading {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.map-loading-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--blue);
-  animation: flow-pulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes flow-pulse {
-  to { opacity: 0.35; }
-}
-
-.mobile-locations {
-  top: 22px;
-  right: 25px;
-  height: 43px;
-  border-radius: 24px;
-  color: var(--primary);
-  font-size: 12px;
-  background: var(--panel);
-}
-
 .map-message {
   top: 81px;
   left: 26px;
@@ -501,7 +473,7 @@ body:not(.light) .brand img {
   font-size: 11px;
 }
 
-/* One white sheet; its content scrolls while the map stays in place. */
+/* The sensor sheet scrolls while the map stays in place. */
 .details {
   position: absolute;
   left: auto;
@@ -1148,24 +1120,11 @@ body:not(.light) .brand img {
     repeating-linear-gradient(108deg, transparent 0 18px, #d0dce2 18px 20px, transparent 20px 40px);
 }
 
-.basemap-terrain .basemap-preview {
-  background-color: #e0e9d8;
-  background-image: repeating-radial-gradient(ellipse at 0% 90%, #8b9e7044 0 1px, transparent 2px 9px),
-    linear-gradient(125deg, transparent 30%, #bddde8 32% 40%, transparent 42%);
-}
-
 .basemap-satellite .basemap-preview {
   background-color: #324d43;
   background-image: linear-gradient(125deg, transparent 30%, #273e45 32% 40%, transparent 42%),
     repeating-linear-gradient(23deg, transparent 0 12px, #bfd2b44a 12px 13px, transparent 13px 28px),
     repeating-linear-gradient(108deg, transparent 0 18px, #b9c3bc77 18px 19px, transparent 19px 40px);
-}
-
-.basemap-dark .basemap-preview {
-  background-color: #152637;
-  background-image: linear-gradient(125deg, transparent 30%, #164252 32% 40%, transparent 42%),
-    repeating-linear-gradient(23deg, transparent 0 12px, #3d5368 12px 13px, transparent 13px 28px),
-    repeating-linear-gradient(108deg, transparent 0 18px, #3b4f61 18px 19px, transparent 19px 40px);
 }
 
 .basemap-option strong,
@@ -1208,21 +1167,13 @@ body:not(.light) .brand img {
   padding: 20px 22px 24px;
 }
 
-.sidebar {
-  top: 81px;
-  bottom: 77px;
-  left: 26px;
-  max-height: calc(100% - 158px);
-}
-
 .initial-loading {
   background: var(--bg);
   font-size: 12px;
 }
 
 body:not(.light) .search-wrap,
-body:not(.light) .map-btn,
-body:not(.light) .mobile-locations {
+body:not(.light) .map-btn {
   border-color: var(--line);
   color: var(--blue);
 }
@@ -1276,21 +1227,13 @@ body:not(.light) .map-credit-line {
     gap: 10px;
   }
 
-  .brand img,
-  .light .brand img {
-    width: 93px;
-    height: auto;
-  }
-
   .brand > span {
     font-size: 5.5px;
     letter-spacing: 0.32px;
   }
 
   .header-nav,
-  .header-location,
-  .header-actions .more-menu,
-  .mobile-locations {
+  .header-location {
     display: none;
   }
 
@@ -1470,7 +1413,6 @@ body:not(.light) .map-credit-line {
   }
 
   .map-provider-notice,
-  .map-loading,
   .map-message {
     top: 74px;
     left: 22px;
@@ -1482,23 +1424,10 @@ body:not(.light) .map-credit-line {
   .has-selection.sheet-expanded .search-dock,
   .has-selection.sheet-expanded .map-controls,
   .has-selection.sheet-expanded .map-status,
-  .has-selection.sheet-expanded .map-loading,
   .has-selection.sheet-expanded .map-provider-notice,
   .has-selection.sheet-expanded .map-message {
     visibility: hidden;
     pointer-events: none;
-  }
-
-  .sidebar,
-  .sidebar.mobile-open {
-    left: 12px;
-    right: 12px;
-    top: 75px;
-    bottom: 27px;
-    width: auto;
-    max-width: none;
-    max-height: none;
-    z-index: 18;
   }
 
   dialog {
@@ -1523,7 +1452,6 @@ body:not(.light) .map-credit-line {
 
 @media (max-width: 340px) {
   :root { --header-height: calc(70px + env(safe-area-inset-top, 0px)); }
-  .brand img, .light .brand img { width: 83px; }
   .brand > span { font-size: 5px; letter-spacing: 0.1px; }
   .header-actions .icon-btn { width: 32px; }
   .detail-content { padding-inline: 11px; }
@@ -1543,7 +1471,7 @@ body:not(.light) .map-credit-line {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .details, .map-loading-dot, .pin-ring {
+  .details, .pin-ring {
     animation: none;
     transition: none;
   }
@@ -1560,4 +1488,253 @@ body:not(.light) .map-credit-line {
 }
 .details[data-status="advisory"] .condition-copy h3 {
   color: #063c28;
+}
+
+/* The map reaches behind the header; floating UI keeps its original screen position. */
+.app-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.workspace {
+  height: 100dvh;
+}
+
+.search-dock,
+.has-selection .search-dock,
+.details {
+  top: calc(var(--header-height) + 22px);
+}
+
+.map-message,
+.has-selection .map-message,
+.map-provider-notice {
+  top: calc(var(--header-height) + 80px);
+}
+
+@media (max-width: 760px) {
+  .details,
+  .details.expanded {
+    top: auto;
+  }
+
+  .map-message,
+  .has-selection .map-message,
+  .map-provider-notice {
+    top: calc(var(--header-height) + 74px);
+  }
+}
+
+/* Translucent surfaces: blur only the layers over the map, not every card inside them. */
+body.light {
+  --glass-surface: linear-gradient(145deg, rgba(255, 255, 255, .78), rgba(242, 249, 255, .62));
+  --glass-float: linear-gradient(155deg, rgba(255, 255, 255, .83), rgba(239, 247, 255, .64));
+  --glass-inset: linear-gradient(155deg, rgba(255, 255, 255, .58), rgba(239, 247, 255, .37));
+  --glass-stroke: rgba(255, 255, 255, .9);
+  --glass-shadow: 0 12px 34px rgba(24, 54, 85, .16),
+    0 0 0 1px rgba(42, 82, 116, .1), inset 0 1px 0 rgba(255, 255, 255, .9);
+  --muted: #43586b;
+  --faint: #526779;
+}
+
+body.light .app-header,
+body.light .details,
+body.light dialog {
+  background: var(--glass-surface);
+  border-color: var(--glass-stroke);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  backdrop-filter: blur(20px) saturate(1.35);
+}
+
+body.light .app-header {
+  box-shadow: 0 5px 24px rgba(20, 56, 91, .12), inset 0 1px rgba(255, 255, 255, .92);
+}
+
+body.light .details,
+body.light dialog {
+  box-shadow: var(--glass-shadow);
+}
+
+body.light dialog::backdrop {
+  background: rgba(12, 28, 49, .33);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+}
+
+body.light .detail-footer,
+body.light .dialog-head {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(240, 247, 255, .48));
+  border-color: rgba(49, 88, 120, .13);
+}
+
+body.light .search-wrap,
+body.light .search-results,
+body.light .map-btn,
+body.light .map-control-group,
+body.light .mode-badge,
+body.light .mode-badge.live,
+body.light .map-provider-notice,
+body.light .map-pick-banner,
+body.light .toast {
+  background: var(--glass-float);
+  border-color: var(--glass-stroke);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(15px) saturate(1.4);
+  backdrop-filter: blur(15px) saturate(1.4);
+}
+
+body.light .map-control-group .map-btn {
+  background: rgba(255, 255, 255, .2);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+body.light .map-control-group .map-btn + .map-btn {
+  border-top: 1px solid rgba(50, 85, 118, .16);
+}
+
+body.light .map-credit-line {
+  background: rgba(255, 255, 255, .8);
+  border-radius: 4px;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+body.light .map-message {
+  color: #743844;
+  background: linear-gradient(145deg, rgba(255, 251, 251, .85), rgba(255, 236, 239, .72));
+  border-color: rgba(167, 77, 96, .3);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+}
+
+body.light .condition-card {
+  background: linear-gradient(155deg,
+    color-mix(in srgb, var(--status-color) 9%, rgba(255, 255, 255, .84)),
+    rgba(255, 255, 255, .48));
+  border: 1px solid color-mix(in srgb, var(--status-color) 23%, rgba(255, 255, 255, .85));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .8);
+}
+
+body.light .measure-card,
+body.light .intelligence-card,
+body.light .support-card,
+body.light .chart-empty,
+body.light .probe-cell,
+body.light .node-card,
+body.light .note:not(.warning),
+body.light .basemap-option,
+body.light .layer-option,
+body.light .radio-option,
+body.light .route-note,
+body.light .activity-item,
+body.light .secondary-btn {
+  background: var(--glass-inset);
+  border: 1px solid rgba(95, 138, 172, .2);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .79);
+}
+
+body.light .node-card.selected {
+  background: linear-gradient(150deg, rgba(225, 242, 255, .9), rgba(242, 249, 255, .65));
+  border-color: rgba(24, 117, 195, .48);
+}
+
+body.light .support-card.countdown {
+  background: linear-gradient(145deg, rgba(255, 241, 244, .85), rgba(255, 255, 255, .48));
+  border-color: rgba(209, 90, 106, .19);
+}
+
+body.light .recede-card {
+  background: linear-gradient(145deg, rgba(227, 250, 240, .86), rgba(255, 255, 255, .52));
+  border: 1px solid rgba(51, 139, 101, .19);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .8);
+}
+
+body.light .chip:not(.active),
+body.light .segmented button:not(.active) {
+  background: var(--glass-inset);
+  border-color: rgba(95, 138, 172, .2);
+}
+
+body.light .menu-list {
+  gap: 10px;
+}
+
+body.light .menu-list button,
+body.light .menu-list button:last-child,
+body.light .menu-list button:has(+ button:hover) {
+  padding: 15px 13px;
+  background: var(--glass-inset);
+  border: 1px solid rgba(95, 138, 172, .22);
+  border-radius: 14px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .85);
+}
+
+body.light .menu-list button:hover,
+body.light .search-result:hover {
+  background: rgba(232, 245, 255, .78);
+  border-color: rgba(19, 113, 193, .4);
+}
+
+body.light dialog input:not([type=checkbox]):not([type=radio]),
+body.light dialog select,
+body.light dialog textarea {
+  background: rgba(255, 255, 255, .68);
+  border-color: rgba(95, 138, 172, .3);
+}
+
+body.light .detail-footer .primary-btn,
+body.light .dialog-body .primary-btn {
+  box-shadow: inset 0 1px rgba(255, 255, 255, .38), 0 6px 16px rgba(5, 60, 130, .18);
+}
+
+@media (max-width: 760px) {
+  body.light .details,
+  body.light dialog {
+    -webkit-backdrop-filter: blur(14px) saturate(1.25);
+    backdrop-filter: blur(14px) saturate(1.25);
+  }
+
+  body.light .details {
+    background: linear-gradient(160deg, rgba(255, 255, 255, .84), rgba(244, 250, 255, .72));
+  }
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body.light {
+    --glass-surface: #f9fbfd;
+    --glass-float: #ffffff;
+    --glass-inset: #f3f7fb;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body.light {
+    --glass-surface: #f9fbfd;
+    --glass-float: #ffffff;
+    --glass-inset: #f3f7fb;
+  }
+
+  body.light .app-header,
+  body.light .details,
+  body.light dialog,
+  body.light .search-wrap,
+  body.light .search-results,
+  body.light .map-btn,
+  body.light .map-control-group,
+  body.light .mode-badge,
+  body.light .map-provider-notice,
+  body.light .map-message,
+  body.light .toast {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  body.light .details {
+    background: var(--glass-surface);
+  }
 }
