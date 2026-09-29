@@ -35,6 +35,11 @@ const MAP_LIMITS: [[number, number], [number, number]] = [
   [142, 31],
 ];
 
+// Hide the heat at regional zooms; only the exact sensor pin remains visible.
+function heatScaleForZoom(zoom: number) {
+  return Math.max(0, Math.min(1, (zoom - 8) / 4));
+}
+
 /** MapLibre draws geography. React renders only registered FLOW monitoring points. */
 export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
   const flow = useFlow();
@@ -183,6 +188,13 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         });
         map.current = instance;
         appliedStyle.current = { basemap: initialMode, retry };
+        instance.on('zoom', () => {
+          if (!instance) return;
+          const scale = String(heatScaleForZoom(instance.getZoom()));
+          for (const marker of markers.current.values()) {
+            marker.getElement().style.setProperty('--heat-scale', scale);
+          }
+        });
         instance.on('error', () => {
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
         });
@@ -275,6 +287,7 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         marker = new lib.Marker({ element: document.createElement('div') })
           .setLngLat([node.longitude, node.latitude])
           .addTo(instance);
+        marker.getElement().style.setProperty('--heat-scale', String(heatScaleForZoom(instance.getZoom())));
         markers.current.set(node.id, marker);
         hostsChanged = true;
       } else {
@@ -320,19 +333,16 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
             style={{ '--status-color': status.color } as CSSProperties}
             data-level={status.level ?? 'unavailable'}
             data-unavailable={status.level === null}
-            aria-label={`${node.name}: ${status.label}. Open details.`}
+            aria-label={`${node.name}: ${status.label} at this sensor. Open details.`}
             aria-pressed={flow.selectedId === id}
+            title={`${status.label} at this sensor. Shading does not show flood extent.`}
             onClick={(event) => {
               event.stopPropagation();
               flow.selectNode(id);
             }}
           >
             <span className="marker-label">{node.name}</span>
-            <span className="water-spread" aria-hidden="true">
-              <svg viewBox="0 0 260 220" focusable="false">
-                <path className="water-spread-edge" d="M9 126c8-19 30-16 43-25 15-9 10-29 29-34 17-4 28 9 42 0 16-10 27-35 47-26 14 6 13 24 26 30 16 7 36-4 45 11 10 16-8 28-6 43 2 17 22 26 14 43-8 18-31 12-44 19-18 10-19 27-38 30-18 3-30-14-44-13-22 1-31 18-52 12-17-5-17-23-31-33-15-11-36-9-40-26-4-16 17-19 9-31Z" />
-              </svg>
-            </span>
+            <span className="sensor-heat" aria-hidden="true" />
             <span className="pin-ring" />
           </button>,
           element,

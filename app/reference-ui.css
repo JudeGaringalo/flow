@@ -380,36 +380,54 @@ body.light {
   isolation: isolate;
 }
 
-.map-node .water-spread {
+.map-node .sensor-heat {
   position: absolute;
   top: 50%;
   left: 50%;
   z-index: 0;
-  width: var(--water-size, 145px);
-  height: var(--water-size, 145px);
+  width: var(--heat-size, 132px);
+  height: var(--heat-size, 132px);
+  border-radius: 50%;
   pointer-events: none;
-  transform: translate(-50%, -50%);
+  background: radial-gradient(circle,
+    rgb(20 127 200 / .9) 0 10%,
+    rgb(27 151 210 / .78) 22%,
+    rgb(54 190 218 / .56) 39%,
+    rgb(64 121 198 / .33) 59%,
+    rgb(57 83 170 / .13) 75%,
+    transparent 87%);
+  filter: blur(6px);
+  transform: translate(-50%, -50%) scale(var(--heat-scale, 1));
 }
 
-.map-node .water-spread svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
+.map-node[data-level='2'] .sensor-heat {
+  background: radial-gradient(circle,
+    rgb(255 202 36 / .97) 0 11%,
+    rgb(255 202 36 / .88) 24%,
+    rgb(176 218 84 / .72) 38%,
+    rgb(69 190 207 / .49) 55%,
+    rgb(55 104 190 / .23) 72%,
+    transparent 87%);
 }
 
-.map-node .water-spread-edge {
-  fill: var(--status-color);
-  opacity: .72;
+.map-node[data-level='3'] .sensor-heat {
+  background: radial-gradient(circle,
+    rgb(217 47 56 / .98) 0 12%,
+    rgb(230 57 55 / .92) 23%,
+    rgb(255 189 56 / .85) 36%,
+    rgb(191 217 87 / .67) 46%,
+    rgb(61 176 217 / .46) 61%,
+    rgb(54 95 183 / .2) 75%,
+    transparent 88%);
 }
 
-.map-node[data-level='0'] .water-spread,
-.map-node[data-unavailable=true] .water-spread {
+.map-node[data-level='0'] .sensor-heat,
+.map-node[data-unavailable=true] .sensor-heat {
   display: none;
 }
 
-.map-node[data-level='2'] { --water-size: 200px; }
-.map-node[data-level='3'] { --water-size: 275px; }
+.map-node[data-level='2'] { --heat-size: 176px; }
+.map-node[data-level='3'] { --heat-size: 216px; }
 
 .map-node .pin-ring {
   position: relative;
@@ -419,21 +437,15 @@ body.light {
   height: 17px;
   min-width: 17px;
   min-height: 17px;
-  border: 0 !important;
+  border: 2px solid #fff !important;
   border-radius: 50%;
   background: var(--status-color) !important;
-  box-shadow: none !important;
+  box-shadow: 0 1px 5px #142b3899 !important;
 }
 
 .map-node.selected .pin-ring {
   width: 20px;
   height: 20px;
-}
-
-.map-node[data-level='1'] .pin-ring,
-.map-node[data-level='2'] .pin-ring,
-.map-node[data-level='3'] .pin-ring {
-  display: none;
 }
 
 .map-node:active {
