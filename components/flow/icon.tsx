@@ -128,6 +128,10 @@ const paths = {
   'expand': <>
     <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
   </>,
+  'tilt': <>
+    <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+    <path d="M3 8v8l9 5 9-5V8M12 13v8" />
+  </>,
   'layers': <>
     <path 
       d="m12 3 10 5-10 5L2 8Z"

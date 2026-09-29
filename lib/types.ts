@@ -42,6 +42,7 @@ export interface NodeStatus {
 export interface MapHandle {
   focus: (id: string) => void;
   fit: () => void;
+  restoreTilt: () => void;
   showPhilippines: () => void;
   zoomBy: (delta: number) => void;
   locate: (latitude: number, longitude: number, accuracy: number) => boolean;

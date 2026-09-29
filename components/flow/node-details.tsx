@@ -81,7 +81,7 @@ export function NodeDetails() {
           </div>
         </div>
         <p className="measure-disclaimer">
-          Readings come from three fixed threshold probes. Below threshold does not mean a road is safe.
+          Readings reflect fixed water-level thresholds. Below threshold does not mean a road is safe.
           An old or faulty reading cannot confirm current conditions.
         </p>
         <section className="detail-section">
@@ -91,21 +91,19 @@ export function NodeDetails() {
               <div className="probe-cell" key={index}>
                 <span>Level {index + 1}</span>
                 <b className={wet ? 'wet' : ''}>
-                  {node.last_seen && node.quality !== 'unknown' ? (wet ? 'Wet' : 'Dry') : 'Unknown'}
+                  {node.last_seen && node.quality !== 'unknown' ? (wet ? 'Reached' : 'Not reached') : 'Unknown'}
                 </b>
               </div>
             ))}
           </div>
-          <p className="note">These are the last reported probe values. They do not confirm conditions when the reading is unavailable.</p>
+          <p className="note">These are the last reported threshold states. They do not confirm conditions when the reading is unavailable.</p>
           <dl>
             {([
               ['Device ID', node.id],
               ['Last received', node.last_seen
                 ? new Date(node.last_seen).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })
                 : 'No report yet'],
-              ['Coordinates', `${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}`],
-              ['Signal', node.rssi !== null ? `${node.rssi} dBm` : 'Unknown'],
-              ['Firmware', node.firmware || 'Unknown']
+              ['Coordinates', `${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}`]
             ] as const).map(([label, value]) => (
               <div className="keyvalue" key={label}><dt>{label}</dt><dd>{value}</dd></div>
             ))}

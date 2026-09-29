@@ -1326,24 +1326,35 @@ body:not(.light) .map-credit-line {
 
   .map-controls,
   .has-selection .map-controls {
-    right: 17px;
+    right: calc(17px + env(safe-area-inset-right, 0px));
     top: auto;
     bottom: calc(31px + env(safe-area-inset-bottom, 0px));
-    gap: 12px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
   }
 
-  .map-controls .map-control-group,
+  .map-controls .map-control-group {
+    display: flex;
+    flex-direction: row;
+    flex: none;
+  }
+
   .map-controls .fit-control {
-    display: none;
-  }
-
-  .map-controls > .map-btn:last-child {
     display: grid;
   }
 
-  .map-btn {
-    width: 42px;
-    height: 42px;
+  .map-controls .map-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    flex: none;
+  }
+
+  .map-controls .map-control-group .map-btn + .map-btn,
+  body.light .map-controls .map-control-group .map-btn + .map-btn {
+    border-top: 0;
+    border-left: 1px solid var(--line);
   }
 
   .map-controls .map-btn svg {
@@ -1353,8 +1364,8 @@ body:not(.light) .map-credit-line {
 
   .map-status {
     left: 20px;
-    bottom: calc(32px + env(safe-area-inset-bottom, 0px));
-    max-width: calc(100% - 89px);
+    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    max-width: calc(100% - 40px);
   }
 
   .mode-badge,
@@ -1366,11 +1377,10 @@ body:not(.light) .map-credit-line {
 
   .has-selection .map-controls {
     bottom: calc(var(--sheet-height) + 22px);
-    right: 17px;
   }
 
   .has-selection .map-status {
-    bottom: calc(var(--sheet-height) + 24px);
+    display: none;
   }
 
   .map-credit-line,

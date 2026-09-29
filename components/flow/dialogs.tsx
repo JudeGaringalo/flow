@@ -82,7 +82,7 @@ function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<Ma
   return (
     <>
       <p><strong>F.L.O.W.</strong> means Flood-Level Observation &amp; Warning.
-        The map shows the latest report at registered ESP32 sensor locations.</p>
+        The map shows the latest report at registered monitoring locations.</p>
       <Note>Readings are limited to those locations. Follow official warnings and local instructions.</Note>
       <p>A below-threshold reading does not establish a dry road. An unavailable or faulty
         sensor cannot confirm the current condition. FLOW does not measure continuous depth or rainfall.</p>

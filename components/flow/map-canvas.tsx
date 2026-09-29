@@ -36,6 +36,36 @@ const MAP_LIMITS: [[number, number], [number, number]] = [
 ];
 
 const HEAT_SOURCE_ID = 'flow-sensor-heat';
+const BUILDINGS_3D_ID = 'flow-buildings-3d';
+const CITY_PITCH = 60;
+const CITY_BEARING = -17;
+const FOCUS_ZOOM = 17;
+
+function heatPalette(red: number, green: number, blue: number): ExpressionSpecification {
+  const color = (alpha: number) => `rgba(${red},${green},${blue},${alpha})`;
+  return ['interpolate', ['linear'], ['heatmap-density'],
+    0, color(0), .04, color(.02), .1, color(.08), .18, color(.19),
+    .28, color(.37), .42, color(.56), .65, color(.77), 1, color(.92)];
+}
+
+const BLUE = (alpha: number) => `rgba(20,127,200,${alpha})`;
+const YELLOW = (alpha: number) => `rgba(255,202,36,${alpha})`;
+const RED = (alpha: number) => `rgba(217,47,56,${alpha})`;
+
+// Spread each color change over a broad density range. Muted transition stops
+// avoid green and violet while the outer blue fades gradually into the map.
+const WATCH_HEAT: ExpressionSpecification = ['interpolate', ['linear'], ['heatmap-density'],
+  0, BLUE(0), .04, BLUE(.02), .1, BLUE(.08), .18, BLUE(.19),
+  .28, BLUE(.37), .33, BLUE(.45),
+  .41, 'rgba(155,159,169,0.55)', .49, 'rgba(194,183,170,0.61)',
+  .58, YELLOW(.76), .7, YELLOW(.86), 1, YELLOW(.96)];
+
+const WARNING_HEAT: ExpressionSpecification = ['interpolate', ['linear'], ['heatmap-density'],
+  0, BLUE(0), .04, BLUE(.02), .1, BLUE(.08), .18, BLUE(.19),
+  .28, BLUE(.37), .33, BLUE(.45),
+  .41, 'rgba(155,159,169,0.55)', .49, 'rgba(194,183,170,0.61)',
+  .58, YELLOW(.76), .67, YELLOW(.82),
+  .74, 'rgba(219,150,143,0.8)', .84, RED(.92), 1, RED(.96)];
 
 function heatData(flow: ReturnType<typeof useFlow>) {
   return {
@@ -52,30 +82,26 @@ function heatData(flow: ReturnType<typeof useFlow>) {
   };
 }
 
-// A map layer can sit below building footprints and street labels; HTML markers cannot.
+// Render the spread above streets, with building footprints and labels on top.
 function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
   if (!instance.getSource(HEAT_SOURCE_ID)) {
     instance.addSource(HEAT_SOURCE_ID, { type: 'geojson', data: heatData(flow) });
   }
 
   const layers = instance.getStyle().layers;
-  const building = layers.find((layer) => layer.type === 'fill' &&
+  const beforeId = layers.find((layer) => layer.type === 'symbol')?.id;
+  const roads = layers.filter((layer) => layer.type === 'line' &&
+    'source-layer' in layer && layer['source-layer'] === 'transportation');
+  const buildings = layers.filter((layer) => layer.type === 'fill' &&
     'source-layer' in layer && layer['source-layer'] === 'building');
-  const beforeId = building?.id ?? layers.find((layer) =>
-    layer.type === 'line' || layer.type === 'symbol')?.id;
+  const buildingExtrusions = layers.filter((layer) => layer.type === 'fill-extrusion' &&
+    layer.id !== BUILDINGS_3D_ID && 'source-layer' in layer &&
+    layer['source-layer'] === 'building');
   const satellite = flow.basemap === 'satellite';
   const palettes: [number, ExpressionSpecification][] = [
-    [1, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(20,127,200,0)', 0.12, 'rgba(54,105,185,0.22)',
-      0.5, 'rgba(46,174,215,0.54)', 1, 'rgba(20,127,200,0.9)']],
-    [2, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(255,202,36,0)', 0.12, 'rgba(54,105,185,0.22)',
-      0.48, 'rgba(80,190,203,0.52)', 0.72, 'rgba(190,218,84,0.76)',
-      1, 'rgba(255,202,36,0.96)']],
-    [3, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(217,47,56,0)', 0.12, 'rgba(54,105,185,0.24)',
-      0.46, 'rgba(67,180,212,0.55)', 0.7, 'rgba(255,202,36,0.82)',
-      0.86, 'rgba(243,97,51,0.9)', 1, 'rgba(217,47,56,0.98)']],
+    [1, heatPalette(20, 127, 200)],
+    [2, WATCH_HEAT],
+    [3, WARNING_HEAT],
   ];
 
   for (const [level, color] of palettes) {
@@ -95,22 +121,73 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
       filter: ['==', ['get', 'level'], level],
       paint: {
         'heatmap-weight': 1,
-        'heatmap-intensity': 1,
+        // Let one isolated point reach the center color of its status palette.
+        'heatmap-intensity': 2.3,
         'heatmap-color': color,
         'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-          10.5, 1, 11, 58, 12, 118, 13, 175, 14, 190],
+          10.5, 1, 11, 82, 12, 168, 13, 230, 14, 245],
         'heatmap-opacity': opacity,
       },
     };
     instance.addLayer(layer, beforeId);
   }
+
+  // Some styles interleave road lines and text; move every street below the heat.
+  for (const road of roads) instance.moveLayer(road.id, 'flow-sensor-heat-1');
+  // Roof footprints remain visible, and labels stay above the color.
+  for (const building of buildings) instance.moveLayer(building.id, beforeId);
+
+  // Liberty already supplies 3D buildings. Recolor that layer instead of
+  // drawing another extrusion under the original gray one.
+  const color: ExpressionSpecification = ['interpolate', ['linear'],
+    ['to-number', ['get', 'render_height'], 0],
+    0, '#aeb2bb', 8, '#9aa4b6', 16, '#7895c8',
+    30, '#547bc7', 70, '#3562b8'];
+  const opacity = satellite ? 0.86 : 0.96;
+  if (buildingExtrusions.length) {
+    if (instance.getLayer(BUILDINGS_3D_ID)) instance.removeLayer(BUILDINGS_3D_ID);
+    for (const extrusion of buildingExtrusions) {
+      instance.setPaintProperty(extrusion.id, 'fill-extrusion-color', color);
+      instance.setPaintProperty(extrusion.id, 'fill-extrusion-opacity', opacity);
+      instance.moveLayer(extrusion.id, beforeId);
+    }
+  } else {
+    const building = buildings.find((layer) => 'source' in layer && typeof layer.source === 'string');
+    if (building && 'source' in building && typeof building.source === 'string') {
+      if (instance.getLayer(BUILDINGS_3D_ID)) {
+        instance.setPaintProperty(BUILDINGS_3D_ID, 'fill-extrusion-color', color);
+        instance.setPaintProperty(BUILDINGS_3D_ID, 'fill-extrusion-opacity', opacity);
+        instance.moveLayer(BUILDINGS_3D_ID, beforeId);
+      } else {
+        instance.addLayer({
+          id: BUILDINGS_3D_ID,
+          type: 'fill-extrusion',
+          source: building.source,
+          'source-layer': 'building',
+          minzoom: 14,
+          filter: ['!=', ['get', 'hide_3d'], true],
+          paint: {
+            'fill-extrusion-color': color,
+            'fill-extrusion-opacity': opacity,
+            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
+              14, 0, 15, ['to-number', ['get', 'render_height'], 0]],
+            'fill-extrusion-base': ['to-number', ['get', 'render_min_height'], 0],
+          },
+        }, beforeId);
+      }
+    }
+  }
 }
 
 /** MapLibre draws geography. React renders only registered FLOW monitoring points. */
-export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
+export const MapCanvas = forwardRef<MapHandle, {
+  onFlatViewChange: (flat: boolean) => void;
+}>(function MapCanvas({ onFlatViewChange }, ref) {
   const flow = useFlow();
   const latest = useRef(flow);
   latest.current = flow;
+  const flatViewChange = useRef(onFlatViewChange);
+  flatViewChange.current = onFlatViewChange;
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<LibreMap | null>(null);
@@ -123,6 +200,12 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
   const [mapIssue, setMapIssue] = useState('');
   const [retry, setRetry] = useState(0);
   const lastFocused = useRef<string | null>(null);
+  const initialNodeCentered = useRef(false);
+  const viewTransitioning = useRef<number | null>(null);
+  const nextViewTransition = useRef(0);
+  const previousTilt = useRef<{
+    center: [number, number]; zoom: number; pitch: number; bearing: number;
+  } | null>(null);
 
   /** Offset the selected point into the portion not covered by the detail sheet. */
   const focus = useCallback((id: string) => {
@@ -142,7 +225,9 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
 
     instance.easeTo({
       center: [node.longitude, node.latitude],
-      zoom: Math.max(14, instance.getZoom()),
+      zoom: Math.max(FOCUS_ZOOM, instance.getZoom()),
+      pitch: CITY_PITCH,
+      bearing: CITY_BEARING,
       offset: [
         -coveredWidth / 2,
         mobile ? (availableHeight - rect.height) / 2 + 22 : 0,
@@ -151,23 +236,49 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
     });
   }, []);
 
-  const showPhilippines = useCallback(() => {
-    map.current?.fitBounds(PHILIPPINES_BOUNDS, {
+  const rememberTiltedView = useCallback((instance: LibreMap) => {
+    if (instance.getPitch() <= 1) return;
+    const center = instance.getCenter();
+    previousTilt.current = {
+      center: [center.lng, center.lat],
+      zoom: instance.getZoom(),
+      pitch: instance.getPitch(),
+      bearing: instance.getBearing(),
+    };
+  }, []);
+
+  const finishViewTransitionIfIdle = useCallback((instance: LibreMap, transitionId: number) => {
+    if (viewTransitioning.current !== transitionId || instance.isMoving()) return;
+    viewTransitioning.current = null;
+    flatViewChange.current(instance.getPitch() <= 1);
+  }, []);
+
+  const showPhilippines = useCallback((transitionId?: number) => {
+    const instance = map.current;
+    if (!instance) return;
+    rememberTiltedView(instance);
+    instance.fitBounds(PHILIPPINES_BOUNDS, {
       padding: 32,
       maxZoom: 6,
+      pitch: 0,
+      bearing: 0,
       duration: 320,
-    });
-  }, []);
+    }, transitionId === undefined ? undefined : { flowViewTransition: transitionId });
+    if (transitionId !== undefined) finishViewTransitionIfIdle(instance, transitionId);
+  }, [finishViewTransitionIfIdle, rememberTiltedView]);
 
   const fit = useCallback(() => {
     const instance = map.current;
     const lib = library.current;
-    if (!instance || !lib) return;
+    if (!instance || !lib || viewTransitioning.current !== null) return;
+    const transitionId = ++nextViewTransition.current;
+    viewTransitioning.current = transitionId;
+    rememberTiltedView(instance);
     const nodes = latest.current.visibleNodes.filter((node) =>
       Number.isFinite(node.latitude) && Number.isFinite(node.longitude),
     );
     if (!nodes.length) {
-      showPhilippines();
+      showPhilippines(transitionId);
       return;
     }
     const bounds = new lib.LngLatBounds();
@@ -182,14 +293,33 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         right: latest.current.selectedId && !mobile ? 465 : 45,
       },
       maxZoom: 14.5,
+      pitch: 0,
+      bearing: 0,
       duration: 320,
-    });
-  }, [showPhilippines]);
+    }, { flowViewTransition: transitionId });
+    finishViewTransitionIfIdle(instance, transitionId);
+  }, [finishViewTransitionIfIdle, rememberTiltedView, showPhilippines]);
 
   useImperativeHandle(ref, () => ({
     focus,
     fit,
     showPhilippines,
+    restoreTilt() {
+      const instance = map.current;
+      if (!instance || viewTransitioning.current !== null) return;
+      const transitionId = ++nextViewTransition.current;
+      viewTransitioning.current = transitionId;
+      instance.easeTo({
+        ...(previousTilt.current ?? {
+          center: METRO_MANILA_CENTER,
+          zoom: 15,
+          pitch: CITY_PITCH,
+          bearing: CITY_BEARING,
+        }),
+        duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
+      }, { flowViewTransition: transitionId });
+      finishViewTransitionIfIdle(instance, transitionId);
+    },
     zoomBy(delta) {
       map.current?.zoomTo((map.current?.getZoom() ?? 14) + delta, { duration: 200 });
     },
@@ -206,10 +336,11 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
       userMarker.current = new lib.Marker({ element })
         .setLngLat([longitude, latitude])
         .addTo(instance);
-      instance.easeTo({ center: [longitude, latitude], zoom: 15, duration: 320 });
+      instance.easeTo({ center: [longitude, latitude], zoom: 15,
+        pitch: CITY_PITCH, bearing: CITY_BEARING, duration: 320 });
       return true;
     },
-  }), [focus, fit, showPhilippines]);
+  }), [finishViewTransitionIfIdle, focus, fit, showPhilippines]);
 
   useEffect(() => {
     if (!flow.ready) return;
@@ -235,7 +366,10 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         instance = new lib.Map({
           container: container.current,
           center: METRO_MANILA_CENTER,
-          zoom: window.innerWidth <= 760 ? 12.5 : 11.75,
+          zoom: 15,
+          pitch: CITY_PITCH,
+          bearing: CITY_BEARING,
+          canvasContextAttributes: { antialias: true },
           maxBounds: MAP_LIMITS,
           renderWorldCopies: false,
           transformCameraUpdate: ({ center }) => {
@@ -249,13 +383,24 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
           },
           minZoom: 3,
           maxZoom: 19,
+          maxPitch: 60,
           attributionControl: false,
           style,
         });
         map.current = instance;
+        viewTransitioning.current = null;
+        flatViewChange.current(instance.getPitch() <= 1);
         appliedStyle.current = { basemap: initialMode, retry };
         instance.on('style.load', () => {
           if (instance) addHeatLayers(instance, latest.current);
+        });
+        instance.on('moveend', (event) => {
+          if (cancelled || !instance) return;
+          if (viewTransitioning.current !== null) {
+            if ((event as { flowViewTransition?: number }).flowViewTransition !== viewTransitioning.current) return;
+            viewTransitioning.current = null;
+          }
+          flatViewChange.current(instance.getPitch() <= 1);
         });
         instance.on('error', () => {
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
@@ -292,8 +437,31 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
       instance?.remove();
       map.current = null;
       appliedStyle.current = null;
+      initialNodeCentered.current = false;
+      previousTilt.current = null;
+      viewTransitioning.current = null;
     };
   }, [flow.ready, retry]);
+
+  // Once the first sensor arrives, keep the close opening view on that sensor.
+  useEffect(() => {
+    const instance = map.current;
+    if (!engineVersion || !instance || initialNodeCentered.current || !flow.nodes.length) return;
+    const node = flow.nodes.filter((item) =>
+      Number.isFinite(item.latitude) && Number.isFinite(item.longitude) &&
+      item.longitude >= PHILIPPINES_BOUNDS[0][0] &&
+      item.longitude <= PHILIPPINES_BOUNDS[1][0] &&
+      item.latitude >= PHILIPPINES_BOUNDS[0][1] &&
+      item.latitude <= PHILIPPINES_BOUNDS[1][1])
+      .sort((a, b) =>
+        (a.longitude - METRO_MANILA_CENTER[0]) ** 2 +
+        (a.latitude - METRO_MANILA_CENTER[1]) ** 2 -
+        (b.longitude - METRO_MANILA_CENTER[0]) ** 2 -
+        (b.latitude - METRO_MANILA_CENTER[1]) ** 2)[0];
+    if (!node) return;
+    initialNodeCentered.current = true;
+    if (!flow.selectedId) instance.easeTo({ center: [node.longitude, node.latitude], duration: 320 });
+  }, [engineVersion, flow.nodes, flow.selectedId]);
 
   useEffect(() => {
     if (!engineVersion || !map.current) return;
@@ -311,6 +479,12 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
           // Keep the shared vector source and its already loaded tiles when possible.
           instance.setStyle(style, { diff: true });
           appliedStyle.current = { basemap: flow.basemap, retry };
+          // Diffed styles do not emit style.load. Apply FLOW layers now when
+          // the new style is ready; a full rebuild still uses the listener.
+          const currentStyle = instance.getStyle();
+          if (currentStyle?.name === style.name && currentStyle.layers?.length) {
+            addHeatLayers(instance, latest.current);
+          }
         }
       })
       .catch(() => {
@@ -407,6 +581,7 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
             onClick={(event) => {
               event.stopPropagation();
               flow.selectNode(id);
+              focus(id);
             }}
           >
             <span className="marker-label">{node.name}</span>

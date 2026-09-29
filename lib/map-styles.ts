@@ -51,6 +51,7 @@ function styleLayer(
         ...layer.paint,
         'fill-color': '#e9edef',
         'fill-outline-color': '#dde4e8',
+        ...(satellite ? { 'fill-opacity': 0.88 } : {}),
       };
     } else if (source === 'landcover' || source === 'park') {
       layer.paint = {
@@ -130,6 +131,7 @@ export function composeBasemap(
         { id: 'flow-imagery', type: 'raster', source: 'flow-imagery' },
         ...layers.filter((layer) =>
           layer.type === 'symbol' ||
+          (layer.type === 'fill' && sourceLayer(layer) === 'building') ||
           (layer.type === 'line' &&
             ['transportation', 'boundary'].includes(sourceLayer(layer))),
         ),

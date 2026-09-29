@@ -24,6 +24,7 @@ const sample = {
   layers: [
     { id: 'background', type: 'background', paint: { 'background-color': '#eee' } },
     { id: 'water', type: 'fill', source: 'openmaptiles', 'source-layer': 'water' },
+    { id: 'building', type: 'fill', source: 'openmaptiles', 'source-layer': 'building' },
     { id: 'roads', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation' },
     { id: 'roads-label', type: 'symbol', source: 'openmaptiles', 'source-layer': 'transportation_name',
       minzoom: 12, layout: { 'text-field': ['get', 'name'], 'text-size': 13 } },
@@ -39,7 +40,7 @@ for (const mode of ['standard', 'satellite']) {
   const style = composeBasemap(sample, mode);
   test(`${mode} retains the same road-name expression and placement`, () => {
     const label = style.layers.find((layer) => layer.id === 'roads-label');
-    assert.deepEqual(label.layout, sample.layers[3].layout);
+    assert.deepEqual(label.layout, sample.layers[4].layout);
     assert.equal(label.minzoom, 12);
     assert.equal(label.source, 'openmaptiles');
   });
@@ -53,11 +54,14 @@ for (const mode of ['standard', 'satellite']) {
   });
 }
 test('Composing styles does not mutate the provider style', () => assert.equal(JSON.stringify(sample), original));
-test('Satellite includes imagery and vector labels, but not an opaque vector background', () => {
+test('Satellite keeps buildings above imagery while roads and labels remain visible', () => {
   const style = composeBasemap(sample, 'satellite');
   assert.equal(style.layers[0].type, 'raster');
   assert.ok(style.layers.some((layer) => layer.type === 'symbol'));
-  assert.ok(!style.layers.some((layer) => ['background', 'fill'].includes(layer.type)));
+  assert.ok(!style.layers.some((layer) => layer.type === 'background' || layer.id === 'water'));
+  const building = style.layers.find((layer) => layer.id === 'building');
+  assert.equal(building?.paint?.['fill-opacity'], 0.88);
+  assert.ok(style.layers.indexOf(building) < style.layers.findIndex((layer) => layer.id === 'roads'));
 });
 test('Removed and invalid map names are rejected', () => {
   assert.equal(isBasemap('satellite'), true);

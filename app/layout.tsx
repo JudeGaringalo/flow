@@ -5,7 +5,7 @@ import './reference-ui.css';
 
 export const metadata: Metadata = {
   title: 'FLOW',
-  description: 'A map-first view of monitored flood conditions, with current ESP32 sensor observations.',
+  description: 'A map-first view of monitored flood conditions, with current sensor observations.',
   applicationName: 'FLOW',
   manifest: '/manifest.webmanifest',
   icons: {

@@ -26,6 +26,7 @@ function Workspace() {
     searchRef = useRef<HTMLInputElement>(null),
     searchDock = useRef<HTMLDivElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [flatView, setFlatView] = useState(false);
 
   useEffect(
     () => {
@@ -141,7 +142,7 @@ function Workspace() {
           id="map-workspace"
           tabIndex={-1}
         >
-          <MapCanvas ref={mapRef} />
+          <MapCanvas ref={mapRef} onFlatViewChange={setFlatView} />
           <div
             className="search-dock"
             ref={searchDock}
@@ -153,6 +154,7 @@ function Workspace() {
                   e.preventDefault();
                   if (f.visibleNodes.length) {
                     f.selectNode(f.visibleNodes[0].id);
+                    mapRef.current?.focus(f.visibleNodes[0].id);
                     setSearchOpen(false);
                     searchRef.current?.blur();
                   }
@@ -198,6 +200,7 @@ function Workspace() {
                             key={n.id}
                             onClick={() => {
                               f.selectNode(n.id);
+                              mapRef.current?.focus(n.id);
                               setSearchOpen(false);
                             }}
                           >
@@ -263,10 +266,14 @@ function Workspace() {
             </div>
             <button
               className="map-btn fit-control"
-              aria-label={f.visibleNodes.length ? 'Fit all monitoring points' : 'Show Philippines'}
-              onClick={() => mapRef.current?.fit()}
+              aria-label={flatView ? 'Return to tilted view'
+                : f.visibleNodes.length ? 'Fit all monitoring points' : 'Show Philippines'}
+              onClick={() => {
+                if (flatView) mapRef.current?.restoreTilt();
+                else mapRef.current?.fit();
+              }}
             >
-              <Icon name="expand" />
+              <Icon name={flatView ? 'tilt' : 'expand'} />
             </button>
             <button
               className="map-btn"

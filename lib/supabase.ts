@@ -28,7 +28,7 @@ export function getSupabase(): Promise<SupabaseClient> {
 export async function loadNodes() {
   const db = await getSupabase();
   const { data, error } = await db.from('flow_nodes')
-    .select('id,name,area,latitude,longitude,probes,current_level,quality,last_seen,state_version,rssi,firmware')
+    .select('id,name,area,latitude,longitude,probes,current_level,quality,last_seen,state_version')
     .order('id');
   if (error)
     throw error;
