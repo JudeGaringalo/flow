@@ -66,22 +66,23 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
   const satellite = flow.basemap === 'satellite';
   const palettes: [number, ExpressionSpecification][] = [
     [1, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(20,127,200,0)', 0.18, 'rgba(54,105,185,0.14)',
-      0.55, 'rgba(46,174,215,0.35)', 1, 'rgba(20,127,200,0.72)']],
+      0, 'rgba(20,127,200,0)', 0.12, 'rgba(54,105,185,0.22)',
+      0.5, 'rgba(46,174,215,0.54)', 1, 'rgba(20,127,200,0.9)']],
     [2, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(255,202,36,0)', 0.18, 'rgba(54,105,185,0.13)',
-      0.5, 'rgba(80,190,203,0.34)', 1, 'rgba(255,202,36,0.78)']],
+      0, 'rgba(255,202,36,0)', 0.12, 'rgba(54,105,185,0.22)',
+      0.48, 'rgba(80,190,203,0.52)', 0.72, 'rgba(190,218,84,0.76)',
+      1, 'rgba(255,202,36,0.96)']],
     [3, ['interpolate', ['linear'], ['heatmap-density'],
-      0, 'rgba(217,47,56,0)', 0.18, 'rgba(54,105,185,0.14)',
-      0.48, 'rgba(67,180,212,0.37)', 0.72, 'rgba(255,202,36,0.56)',
-      1, 'rgba(217,47,56,0.82)']],
+      0, 'rgba(217,47,56,0)', 0.12, 'rgba(54,105,185,0.24)',
+      0.46, 'rgba(67,180,212,0.55)', 0.7, 'rgba(255,202,36,0.82)',
+      0.86, 'rgba(243,97,51,0.9)', 1, 'rgba(217,47,56,0.98)']],
   ];
 
   for (const [level, color] of palettes) {
     const id = `flow-sensor-heat-${level}`;
     const opacity: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'],
-      10.5, 0, 11.5, satellite ? 0.42 : 0.68,
-      12.5, satellite ? 0.5 : 0.82];
+      10.5, 0, 11.5, satellite ? 0.75 : 0.85,
+      12.5, satellite ? 0.85 : 0.95];
     if (instance.getLayer(id)) {
       instance.setPaintProperty(id, 'heatmap-opacity', opacity);
       instance.moveLayer(id, beforeId);
@@ -97,7 +98,7 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
         'heatmap-intensity': 1,
         'heatmap-color': color,
         'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-          10.5, 1, 11, 18, 12, 50, 13, 98, 14, 120],
+          10.5, 1, 11, 58, 12, 118, 13, 175, 14, 190],
         'heatmap-opacity': opacity,
       },
     };
