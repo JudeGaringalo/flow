@@ -370,77 +370,84 @@ body:not(.light) .brand img {
   background: transparent !important;
   box-shadow: none !important;
   filter: none !important;
+  isolation: isolate;
+}
+
+.map-node .water-spread {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 0;
+  width: var(--water-size, 145px);
+  height: var(--water-size, 145px);
+  pointer-events: none;
+  opacity: .78;
+  transform: translate(-50%, -50%);
+  transition: width .7s ease-out, height .7s ease-out;
+}
+
+.map-node .water-spread svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  animation: flow-water-fill .8s ease-out both;
+}
+
+.map-node .water-spread-edge {
+  fill: #20a7d555;
+}
+
+.map-node .water-spread-pool {
+  fill: #087fbd66;
+}
+
+.map-node .water-spread-current {
+  fill: #075e9b44;
+  transform-origin: 50% 50%;
+  animation: flow-water-current 4s ease-in-out infinite alternate;
+}
+
+.map-node[data-level='0'] .water-spread,
+.map-node[data-unavailable=true] .water-spread {
+  display: none;
+}
+
+.map-node[data-level='2'] { --water-size: 200px; }
+.map-node[data-level='3'] { --water-size: 275px; }
+
+@keyframes flow-water-fill {
+  from { opacity: 0; transform: scale(.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes flow-water-current {
+  from { transform: translate(-3px, 2px); opacity: .4; }
+  to { transform: translate(4px, -2px); opacity: .8; }
 }
 
 .map-node .pin-ring {
   position: relative;
+  z-index: 1;
   display: block;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
+  width: 17px;
+  height: 17px;
+  min-width: 17px;
+  min-height: 17px;
   border: 2px solid #ffffff !important;
   border-radius: 50%;
-  background: radial-gradient(circle at 32% 24%, #ffffffd9 0 9%,
-    color-mix(in srgb, var(--status-color) 45%, white) 22%,
-    var(--status-color) 72%,
-    color-mix(in srgb, var(--status-color) 75%, #153b53) 100%) !important;
-  box-shadow: inset 0 1px 2px #ffffff9c,
-    0 0 0 3px color-mix(in srgb, var(--status-color) 17%, transparent),
-    0 2px 7px #143a4d45 !important;
-}
-
-.map-node .pin-ring::before,
-.map-node .pin-ring::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 42px;
-  height: 42px;
-  margin: -21px;
-  border: 1.5px solid color-mix(in srgb, var(--status-color) 78%, white);
-  border-radius: 50%;
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--status-color) 10%, transparent);
-  pointer-events: none;
-  opacity: 0;
-  animation: flow-water-ripple 3s ease-out infinite;
-}
-
-.map-node .pin-ring::after {
-  animation-delay: -1.5s;
-}
-
-@keyframes flow-water-ripple {
-  0% { transform: scale(.35); opacity: 0; }
-  12% { opacity: .72; }
-  72% { opacity: .23; }
-  100% { transform: scale(1.45); opacity: 0; }
+  background: var(--status-color) !important;
+  box-shadow: 0 0 0 3px #ffffffb8, 0 2px 7px #143a4d8a !important;
 }
 
 .map-node.selected .pin-ring {
-  width: 25px;
-  height: 25px;
-  border-width: 2px !important;
-  box-shadow: inset 0 1px 2px #ffffffb3,
-    0 0 0 4px color-mix(in srgb, var(--status-color) 22%, transparent),
-    0 3px 9px #143a4d4d !important;
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 0 0 3px #ffffffd9, 0 3px 9px #143a4d8a !important;
 }
 
 .map-node[data-unavailable=true] .pin-ring {
-  width: 20px;
-  height: 20px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-color) 19%, transparent) !important;
-}
-
-.map-node[data-unavailable=true] .pin-ring::before {
-  animation: none;
-  opacity: .45;
-  transform: scale(.82);
-}
-
-.map-node[data-unavailable=true] .pin-ring::after {
-  display: none;
+  box-shadow: 0 0 0 3px #ffffffb8, 0 2px 7px #143a4d59 !important;
 }
 
 .map-node:active {
@@ -450,6 +457,7 @@ body:not(.light) .brand img {
 .map-node .marker-label,
 .map-node.selected .marker-label {
   display: none;
+  z-index: 2;
 }
 
 .map-node:hover .marker-label,
@@ -459,14 +467,13 @@ body:not(.light) .brand img {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .map-node .pin-ring::before {
+  .map-node .water-spread svg,
+  .map-node .water-spread-current {
     animation: none;
-    opacity: .55;
-    transform: scale(.82);
   }
 
-  .map-node .pin-ring::after {
-    display: none;
+  .map-node .water-spread {
+    transition: none;
   }
 }
 
