@@ -358,6 +358,7 @@ body:not(.light) .brand img {
 }
 
 .map-node {
+  position: relative;
   display: grid;
   place-items: center;
   width: 44px;
@@ -372,6 +373,7 @@ body:not(.light) .brand img {
 }
 
 .map-node .pin-ring {
+  position: relative;
   display: block;
   width: 22px;
   height: 22px;
@@ -379,24 +381,66 @@ body:not(.light) .brand img {
   min-height: 22px;
   border: 2px solid #ffffff !important;
   border-radius: 50%;
-  background: var(--status-color);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-color) 22%, transparent),
-    0 0 0 8px color-mix(in srgb, var(--status-color) 9%, transparent),
-    0 2px 4px #143a4d23;
+  background: radial-gradient(circle at 32% 24%, #ffffffd9 0 9%,
+    color-mix(in srgb, var(--status-color) 45%, white) 22%,
+    var(--status-color) 72%,
+    color-mix(in srgb, var(--status-color) 75%, #153b53) 100%) !important;
+  box-shadow: inset 0 1px 2px #ffffff9c,
+    0 0 0 3px color-mix(in srgb, var(--status-color) 17%, transparent),
+    0 2px 7px #143a4d45 !important;
+}
+
+.map-node .pin-ring::before,
+.map-node .pin-ring::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  margin: -21px;
+  border: 1.5px solid color-mix(in srgb, var(--status-color) 78%, white);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--status-color) 10%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: flow-water-ripple 3s ease-out infinite;
+}
+
+.map-node .pin-ring::after {
+  animation-delay: -1.5s;
+}
+
+@keyframes flow-water-ripple {
+  0% { transform: scale(.35); opacity: 0; }
+  12% { opacity: .72; }
+  72% { opacity: .23; }
+  100% { transform: scale(1.45); opacity: 0; }
 }
 
 .map-node.selected .pin-ring {
   width: 25px;
   height: 25px;
   border-width: 2px !important;
-  box-shadow: 0 0 0 5px color-mix(in srgb, var(--status-color) 24%, transparent),
-    0 0 0 10px color-mix(in srgb, var(--status-color) 11%, transparent);
+  box-shadow: inset 0 1px 2px #ffffffb3,
+    0 0 0 4px color-mix(in srgb, var(--status-color) 22%, transparent),
+    0 3px 9px #143a4d4d !important;
 }
 
 .map-node[data-unavailable=true] .pin-ring {
   width: 20px;
   height: 20px;
-  box-shadow: 0 0 0 4px #a5b2bb35;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-color) 19%, transparent) !important;
+}
+
+.map-node[data-unavailable=true] .pin-ring::before {
+  animation: none;
+  opacity: .45;
+  transform: scale(.82);
+}
+
+.map-node[data-unavailable=true] .pin-ring::after {
+  display: none;
 }
 
 .map-node:active {
@@ -412,6 +456,18 @@ body:not(.light) .brand img {
 .map-node:focus-visible .marker-label {
   display: block;
   opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-node .pin-ring::before {
+    animation: none;
+    opacity: .55;
+    transform: scale(.82);
+  }
+
+  .map-node .pin-ring::after {
+    display: none;
+  }
 }
 
 .map-credit-line {
