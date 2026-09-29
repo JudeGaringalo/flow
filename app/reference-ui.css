@@ -1324,19 +1324,27 @@ body:not(.light) .map-credit-line {
     height: 21px;
   }
 
+  .map-workspace.has-selection:not(.sheet-expanded) {
+    --sheet-height: min(50%, max(250px, calc(100dvh - 330px)));
+  }
+
+  .has-selection .search-dock {
+    right: calc(76px + env(safe-area-inset-right, 0px));
+  }
+
   .map-controls,
   .has-selection .map-controls {
     right: calc(17px + env(safe-area-inset-right, 0px));
     top: auto;
     bottom: calc(31px + env(safe-area-inset-bottom, 0px));
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
     gap: 8px;
   }
 
   .map-controls .map-control-group {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     flex: none;
   }
 
@@ -1345,16 +1353,16 @@ body:not(.light) .map-credit-line {
   }
 
   .map-controls .map-btn {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 42px;
+    height: 42px;
+    min-height: 42px;
     flex: none;
   }
 
   .map-controls .map-control-group .map-btn + .map-btn,
   body.light .map-controls .map-control-group .map-btn + .map-btn {
-    border-top: 0;
-    border-left: 1px solid var(--line);
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 
   .map-controls .map-btn svg {
@@ -1364,7 +1372,7 @@ body:not(.light) .map-credit-line {
 
   .map-status {
     left: 20px;
-    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(32px + env(safe-area-inset-bottom, 0px));
     max-width: calc(100% - 40px);
   }
 
@@ -1376,11 +1384,11 @@ body:not(.light) .map-credit-line {
   }
 
   .has-selection .map-controls {
-    bottom: calc(var(--sheet-height) + 22px);
+    bottom: calc(var(--sheet-height) + 14px);
   }
 
   .has-selection .map-status {
-    display: none;
+    bottom: calc(var(--sheet-height) + 24px);
   }
 
   .map-credit-line,
@@ -1507,6 +1515,19 @@ body:not(.light) .map-credit-line {
   .toasts {
     bottom: 18px;
     z-index: 80;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 620px) {
+  .map-controls,
+  .has-selection .map-controls {
+    gap: 6px;
+  }
+
+  .map-controls .map-btn {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
   }
 }
 
