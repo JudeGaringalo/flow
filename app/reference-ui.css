@@ -357,7 +357,12 @@ body:not(.light) .brand img {
   background: #99a5af;
 }
 
-body.light { --warning: #d92f38; }
+body.light {
+  --advisory: #147fc8;
+  --watch: #ffca24;
+  --warning: #d92f38;
+  --below: #758491;
+}
 
 .map-node {
   position: relative;
@@ -394,11 +399,8 @@ body.light { --warning: #d92f38; }
 }
 
 .map-node .water-spread-edge {
-  fill: color-mix(in srgb, var(--status-color) 35%, transparent);
-}
-
-.map-node .water-spread-pool {
-  fill: color-mix(in srgb, var(--status-color) 42%, transparent);
+  fill: var(--status-color);
+  opacity: .72;
 }
 
 .map-node[data-level='0'] .water-spread,
@@ -417,20 +419,21 @@ body.light { --warning: #d92f38; }
   height: 17px;
   min-width: 17px;
   min-height: 17px;
-  border: 2px solid #ffffff !important;
+  border: 0 !important;
   border-radius: 50%;
   background: var(--status-color) !important;
-  box-shadow: 0 0 0 3px #ffffffb8, 0 2px 7px #143a4d8a !important;
+  box-shadow: none !important;
 }
 
 .map-node.selected .pin-ring {
   width: 20px;
   height: 20px;
-  box-shadow: 0 0 0 3px #ffffffd9, 0 3px 9px #143a4d8a !important;
 }
 
-.map-node[data-unavailable=true] .pin-ring {
-  box-shadow: 0 0 0 3px #ffffffb8, 0 2px 7px #143a4d59 !important;
+.map-node[data-level='1'] .pin-ring,
+.map-node[data-level='2'] .pin-ring,
+.map-node[data-level='3'] .pin-ring {
+  display: none;
 }
 
 .map-node:active {

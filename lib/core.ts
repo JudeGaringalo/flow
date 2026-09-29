@@ -5,14 +5,14 @@ export const STATUS: Record<StatusKey, Omit<NodeStatus, 'age'>> = {
     key: 'below',
     label: 'Below first threshold',
     short: 'Below threshold',
-    color: '#648cad',
+    color: '#758491',
     level: 0
   },
   advisory: {
     key: 'advisory',
     label: 'Flood Advisory',
     short: 'Advisory',
-    color: '#12b969',
+    color: '#147fc8',
     level: 1
   },
   watch: {
