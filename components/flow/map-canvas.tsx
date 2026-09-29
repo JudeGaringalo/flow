@@ -10,7 +10,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { Map as LibreMap, Marker as LibreMarker } from 'maplibre-gl';
+import type { ExpressionSpecification, GeoJSONSource, LayerSpecification, Map as LibreMap, Marker as LibreMarker } from 'maplibre-gl';
 
 import { useFlow } from '@/hooks/use-flow';
 import { loadBasemap } from '@/lib/map-styles';
@@ -35,9 +35,74 @@ const MAP_LIMITS: [[number, number], [number, number]] = [
   [142, 31],
 ];
 
-// Hide the heat at regional zooms; only the exact sensor pin remains visible.
-function heatScaleForZoom(zoom: number) {
-  return Math.max(0, Math.min(1, (zoom - 8) / 4));
+const HEAT_SOURCE_ID = 'flow-sensor-heat';
+
+function heatData(flow: ReturnType<typeof useFlow>) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: flow.visibleNodes.flatMap((node) => {
+      const level = flow.getStatus(node).level;
+      if (!level || !Number.isFinite(node.latitude) || !Number.isFinite(node.longitude)) return [];
+      return [{
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [node.longitude, node.latitude] },
+        properties: { level },
+      }];
+    }),
+  };
+}
+
+// A map layer can sit below building footprints and street labels; HTML markers cannot.
+function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
+  if (!instance.getSource(HEAT_SOURCE_ID)) {
+    instance.addSource(HEAT_SOURCE_ID, { type: 'geojson', data: heatData(flow) });
+  }
+
+  const layers = instance.getStyle().layers;
+  const building = layers.find((layer) => layer.type === 'fill' &&
+    'source-layer' in layer && layer['source-layer'] === 'building');
+  const beforeId = building?.id ?? layers.find((layer) =>
+    layer.type === 'line' || layer.type === 'symbol')?.id;
+  const satellite = flow.basemap === 'satellite';
+  const palettes: [number, ExpressionSpecification][] = [
+    [1, ['interpolate', ['linear'], ['heatmap-density'],
+      0, 'rgba(20,127,200,0)', 0.18, 'rgba(54,105,185,0.14)',
+      0.55, 'rgba(46,174,215,0.35)', 1, 'rgba(20,127,200,0.72)']],
+    [2, ['interpolate', ['linear'], ['heatmap-density'],
+      0, 'rgba(255,202,36,0)', 0.18, 'rgba(54,105,185,0.13)',
+      0.5, 'rgba(80,190,203,0.34)', 1, 'rgba(255,202,36,0.78)']],
+    [3, ['interpolate', ['linear'], ['heatmap-density'],
+      0, 'rgba(217,47,56,0)', 0.18, 'rgba(54,105,185,0.14)',
+      0.48, 'rgba(67,180,212,0.37)', 0.72, 'rgba(255,202,36,0.56)',
+      1, 'rgba(217,47,56,0.82)']],
+  ];
+
+  for (const [level, color] of palettes) {
+    const id = `flow-sensor-heat-${level}`;
+    const opacity: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'],
+      10.5, 0, 11.5, satellite ? 0.42 : 0.68,
+      12.5, satellite ? 0.5 : 0.82];
+    if (instance.getLayer(id)) {
+      instance.setPaintProperty(id, 'heatmap-opacity', opacity);
+      instance.moveLayer(id, beforeId);
+      continue;
+    }
+    const layer: LayerSpecification = {
+      id,
+      type: 'heatmap',
+      source: HEAT_SOURCE_ID,
+      filter: ['==', ['get', 'level'], level],
+      paint: {
+        'heatmap-weight': 1,
+        'heatmap-intensity': 1,
+        'heatmap-color': color,
+        'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
+          10.5, 1, 11, 18, 12, 50, 13, 98, 14, 120],
+        'heatmap-opacity': opacity,
+      },
+    };
+    instance.addLayer(layer, beforeId);
+  }
 }
 
 /** MapLibre draws geography. React renders only registered FLOW monitoring points. */
@@ -188,12 +253,8 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         });
         map.current = instance;
         appliedStyle.current = { basemap: initialMode, retry };
-        instance.on('zoom', () => {
-          if (!instance) return;
-          const scale = String(heatScaleForZoom(instance.getZoom()));
-          for (const marker of markers.current.values()) {
-            marker.getElement().style.setProperty('--heat-scale', scale);
-          }
+        instance.on('style.load', () => {
+          if (instance) addHeatLayers(instance, latest.current);
         });
         instance.on('error', () => {
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
@@ -267,6 +328,13 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
 
   useEffect(() => {
     const instance = map.current;
+    if (!engineVersion || !instance) return;
+    const source = instance.getSource(HEAT_SOURCE_ID) as GeoJSONSource | undefined;
+    if (source) void source.setData(heatData(flow));
+  }, [engineVersion, flow.visibleNodes, flow.getStatus]);
+
+  useEffect(() => {
+    const instance = map.current;
     const lib = library.current;
     if (!engineVersion || !instance || !lib) return;
     const active = new Set(flow.visibleNodes.map((node) => node.id));
@@ -287,7 +355,6 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
         marker = new lib.Marker({ element: document.createElement('div') })
           .setLngLat([node.longitude, node.latitude])
           .addTo(instance);
-        marker.getElement().style.setProperty('--heat-scale', String(heatScaleForZoom(instance.getZoom())));
         markers.current.set(node.id, marker);
         hostsChanged = true;
       } else {
@@ -342,7 +409,6 @@ export const MapCanvas = forwardRef<MapHandle>(function MapCanvas(_, ref) {
             }}
           >
             <span className="marker-label">{node.name}</span>
-            <span className="sensor-heat" aria-hidden="true" />
             <span className="pin-ring" />
           </button>,
           element,
