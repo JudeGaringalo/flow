@@ -26,7 +26,7 @@ export const STATUS: Record<StatusKey, Omit<NodeStatus, 'age'>> = {
     key: 'warning',
     label: 'Flood Warning',
     short: 'Warning',
-    color: '#ff8427',
+    color: '#d92f38',
     level: 3
   },
   unavailable: {

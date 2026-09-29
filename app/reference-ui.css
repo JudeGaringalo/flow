@@ -357,6 +357,8 @@ body:not(.light) .brand img {
   background: #99a5af;
 }
 
+body.light { --warning: #d92f38; }
+
 .map-node {
   position: relative;
   display: grid;
@@ -381,9 +383,7 @@ body:not(.light) .brand img {
   width: var(--water-size, 145px);
   height: var(--water-size, 145px);
   pointer-events: none;
-  opacity: .78;
   transform: translate(-50%, -50%);
-  transition: width .7s ease-out, height .7s ease-out;
 }
 
 .map-node .water-spread svg {
@@ -391,21 +391,14 @@ body:not(.light) .brand img {
   width: 100%;
   height: 100%;
   overflow: visible;
-  animation: flow-water-fill .8s ease-out both;
 }
 
 .map-node .water-spread-edge {
-  fill: #20a7d555;
+  fill: color-mix(in srgb, var(--status-color) 35%, transparent);
 }
 
 .map-node .water-spread-pool {
-  fill: #087fbd66;
-}
-
-.map-node .water-spread-current {
-  fill: #075e9b44;
-  transform-origin: 50% 50%;
-  animation: flow-water-current 4s ease-in-out infinite alternate;
+  fill: color-mix(in srgb, var(--status-color) 42%, transparent);
 }
 
 .map-node[data-level='0'] .water-spread,
@@ -415,16 +408,6 @@ body:not(.light) .brand img {
 
 .map-node[data-level='2'] { --water-size: 200px; }
 .map-node[data-level='3'] { --water-size: 275px; }
-
-@keyframes flow-water-fill {
-  from { opacity: 0; transform: scale(.55); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes flow-water-current {
-  from { transform: translate(-3px, 2px); opacity: .4; }
-  to { transform: translate(4px, -2px); opacity: .8; }
-}
 
 .map-node .pin-ring {
   position: relative;
@@ -464,17 +447,6 @@ body:not(.light) .brand img {
 .map-node:focus-visible .marker-label {
   display: block;
   opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .map-node .water-spread svg,
-  .map-node .water-spread-current {
-    animation: none;
-  }
-
-  .map-node .water-spread {
-    transition: none;
-  }
 }
 
 .map-credit-line {
