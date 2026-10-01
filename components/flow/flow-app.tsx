@@ -8,7 +8,7 @@ import { config } from '@/lib/config';
 import type { EvacuationSiteResponse, MappedEvacuationSite } from '@/lib/evacuation-sites';
 import type { MapHandle } from '@/lib/types';
 import { Icon } from './icon';
-import { MapCanvas } from './map-canvas';
+import { MapCanvas, type HazardState } from './map-canvas';
 import { NodeDetails } from './node-details';
 import { Dialogs, PwaRegistration } from './dialogs';
 
@@ -30,8 +30,14 @@ function Workspace() {
   const [flatView, setFlatView] = useState(false);
   const [evacuationSites, setEvacuationSites] = useState<MappedEvacuationSite[]>([]);
   const [showEvacuationSites, setShowEvacuationSites] = useState(true);
+  const [showHazard, setShowHazard] = useState(false);
+  const [hazardState, setHazardState] = useState<HazardState>('off');
   const [siteState, setSiteState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [siteRequest, setSiteRequest] = useState(0);
+
+  useEffect(() => {
+    if (f.selectedId) setShowHazard(true);
+  }, [f.selectedId]);
 
   useEffect(() => {
     if (!f.ready) return;
@@ -127,55 +133,39 @@ function Workspace() {
                 ? 'Live flood conditions'
                 : 'No current readings';
 
+  if (!f.alertLocation && f.locationChecking) return <>
+    <PwaRegistration />
+    <main className="location-gate-page">
+      <section className="location-gate location-gate-checking" role="status">
+        <Image src="/assets/flow-wordmark.svg" alt="FLOW" width={145} height={36} priority />
+        <p>Finding your location…</p>
+      </section>
+    </main>
+  </>;
+
   if (!f.alertLocation) return <>
     <PwaRegistration />
     <main className="location-gate-page">
-  <section
-    className="location-gate"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="location-gate-title"
-    aria-describedby="location-gate-description"
-  >
-    <div className="location-gate-heading">
-      <Image
-        src="/assets/flow-wordmark.svg"
-        alt="FLOW"
-        width={145}
-        height={36}
-        priority
-      />
-      <h1 id="location-gate-title">Enable your location</h1>
-    </div>
-
-    <p id="location-gate-description">
-      FLOW uses your location to check which monitoring points are within 3 km
-      and alert you when their water level rises. If you allow notifications,
-      FLOW saves an approximate area for alerts while the app is closed.
-    </p>
-
-    <button
-      className="primary-btn"
-      type="button"
-      disabled={f.locationWorking}
-      onClick={() => void f.requestAlertLocation()}
-    >
-      {f.locationWorking ? "Checking location…" : "Enable location and alerts"}
-    </button>
-
-    {f.locationError && (
-      <p className="location-gate-error" role="alert">
-        {f.locationError}
-      </p>
-    )}
-
-    <small>
-      Allow location access when prompted. Browser notifications also need
-      permission; FLOW will show alerts on screen when system notifications are
-      unavailable.
-    </small>
-  </section>
-</main>
+      <section className="location-gate" role="dialog" aria-modal="true"
+        aria-labelledby="location-gate-title" aria-describedby="location-gate-description">
+        <div className="location-gate-heading">
+          <Image src="/assets/flow-wordmark.svg" alt="FLOW" width={145} height={36} priority />
+          <h1 id="location-gate-title">Enable your location</h1>
+        </div>
+        <p id="location-gate-description">
+          FLOW uses your location to check which monitoring points are within 3 km and alert you
+          when their water level rises. If you allow notifications, FLOW saves an approximate
+          area for alerts while the app is closed.
+        </p>
+        <button className="primary-btn" type="button" disabled={f.locationWorking}
+          onClick={() => void f.requestAlertLocation()}>
+          {f.locationWorking ? 'Checking location…' : 'Enable location and alerts'}
+        </button>
+        {f.locationError && <p className="location-gate-error" role="alert">{f.locationError}</p>}
+        <small>Allow location access when prompted. Browser notifications also need permission;
+          FLOW will show alerts on screen when system notifications are unavailable.</small>
+      </section>
+    </main>
   </>;
 
   return (
@@ -221,7 +211,8 @@ function Workspace() {
           tabIndex={-1}
         >
           <MapCanvas ref={mapRef} onFlatViewChange={setFlatView}
-            evacuationSites={evacuationSites} showEvacuationSites={showEvacuationSites} />
+            evacuationSites={evacuationSites} showEvacuationSites={showEvacuationSites}
+            showHazard={showHazard} onHazardStateChange={setHazardState} />
           <div
             className="search-dock"
             ref={searchDock}
@@ -371,6 +362,29 @@ function Workspace() {
             </button>
           </div>
           <div className="map-status">
+            {showHazard && <div className="hazard-map-key" role="status">
+              <div className="hazard-map-key-heading">
+                <strong>Modeled flood hazard</strong>
+                <span>{f.selected ? `Near ${f.selected.name}` : 'NOAH · 5-year scenario'}</span>
+              </div>
+              {f.selected && <div className="hazard-live-node">
+                <span className="status-dot" style={{ background: f.getStatus(f.selected).color }} />
+                <span>{f.selected.name}: {f.getStatus(f.selected).label} at this sensor</span>
+              </div>}
+              {hazardState === 'ready' && <div className="hazard-scale" aria-label="Flood hazard levels">
+                <span><i className="hazard-low" />Low</span>
+                <span><i className="hazard-medium" />Medium</span>
+                <span><i className="hazard-high" />High</span>
+              </div>}
+              {hazardState !== 'ready' && <small>
+                {hazardState === 'loading' ? 'Loading mapped areas…'
+                  : hazardState === 'zoom' ? 'Zoom in for detailed hazard areas.'
+                    : hazardState === 'empty' ? 'No mapped areas in view; coverage varies.'
+                      : hazardState === 'unavailable' ? 'Hazard layer unavailable. Try moving the map.'
+                        : 'Preparing mapped areas…'}
+              </small>}
+              <small>Scenario map, not current floodwater.</small>
+            </div>}
             <span className={'mode-badge' + (f.connection === 'live' && !f.offline && f.nodes.some(n => f.getStatus(n).level !== null) ? ' live' : ' offline')}>
               <span className="status-dot" />
               {statusLabel}
@@ -390,6 +404,7 @@ function Workspace() {
       </main>
       <Dialogs mapRef={mapRef} evacuationSites={evacuationSites}
         showEvacuationSites={showEvacuationSites} setShowEvacuationSites={setShowEvacuationSites}
+        showHazard={showHazard} setShowHazard={setShowHazard} hazardState={hazardState}
         siteState={siteState} onRetrySites={() => setSiteRequest(value => value + 1)}
         onSelectEvacuation={id => {
           setShowEvacuationSites(true);

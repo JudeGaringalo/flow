@@ -5,6 +5,7 @@ import { useFlow } from '@/hooks/use-flow';
 import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS } from '@/lib/core';
 import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
+import type { HazardState } from './map-canvas';
 import { Icon } from './icon';
 import { AlertSettings } from './alert-settings';
 import type { MapHandle, ModalKind, StatusKey } from '@/lib/types';
@@ -20,6 +21,9 @@ interface DialogProps {
   evacuationSites: MappedEvacuationSite[];
   showEvacuationSites: boolean;
   setShowEvacuationSites: (visible: boolean) => void;
+  showHazard: boolean;
+  setShowHazard: (visible: boolean) => void;
+  hazardState: HazardState;
   siteState: 'loading' | 'ready' | 'error';
   onRetrySites: () => void;
   onSelectEvacuation: (id: string) => void;
@@ -58,7 +62,8 @@ export function Dialogs(props: DialogProps) {
 }
 
 function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
-  setShowEvacuationSites, siteState, onRetrySites, onSelectEvacuation }:
+  setShowEvacuationSites, showHazard, setShowHazard, hazardState,
+  siteState, onRetrySites, onSelectEvacuation }:
   DialogProps & { kind: ModalKind }) {
   const f = useFlow();
   if (kind === 'menu') return <Menu />;
@@ -77,6 +82,21 @@ function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
           </button>
         ))}
       </div>
+      <h3>Flood hazard</h3>
+      <p>Mapped flood-hazard areas for a 5-year rainfall scenario. This is not live flooding.</p>
+      <button className="hazard-layer-toggle" type="button" aria-pressed={showHazard}
+        onClick={() => setShowHazard(!showHazard)}>
+        <span className="hazard-toggle-colors" aria-hidden="true"><i /><i /><i /></span>
+        <span><strong>{showHazard ? 'Hide hazard map' : 'Show hazard map'}</strong>
+          <small>Low · Medium · High</small></span>
+        <span className="hazard-toggle-state">{showHazard ? 'On' : 'Off'}</span>
+      </button>
+      {showHazard && hazardState === 'unavailable' &&
+        <p role="status">The hazard source is unavailable. Try moving the map or reopen this layer.</p>}
+      <p className="hazard-source">Map data: © NOAH (
+        <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank"
+          rel="noopener noreferrer">ODbL</a>). Coverage and detail vary by area.
+        Sensor markers continue to report live observations separately.</p>
       <h3>Evacuation sites</h3>
       <p>Recorded candidate sites across NCR. Opening status and flood safety are not verified.</p>
       <button className="evacuation-layer-toggle" type="button"
@@ -116,7 +136,8 @@ function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
       <Note>Readings are limited to those locations. Follow official warnings and local instructions.</Note>
       <p>A below-threshold reading does not establish a dry road. An unavailable or faulty
         sensor cannot confirm the current condition. FLOW does not measure continuous depth or rainfall.</p>
-      <p>The device reports three threshold levels. No simulated flood data is shown.</p>
+      <p>The device reports three threshold levels. The optional NOAH hazard layer depicts
+        a modeled rainfall scenario; it is separate from live observations.</p>
       <p className="map-data-credit">Streets and labels: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors.
         Satellite imagery: Esri and its imagery contributors.</p>
     </>
@@ -156,6 +177,7 @@ function EvacuationDirectory({ sites, state, onRetry, onSelect }: {
       </div>}
       {matches.length > 80 && <p>Showing 80 of {matches.length}. Search by name or city for more.</p>}
     </>}
+    <p className="evacuation-directory-credit">Initial site data: © OpenStreetMap contributors (ODbL).</p>
   </div>;
 }
 
