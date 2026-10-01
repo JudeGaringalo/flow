@@ -59,32 +59,34 @@ export function NodeDetails() {
         </div>
       </div>
       <div className="detail-content">
-        <div className="condition-and-trend">
-          <div className="condition-card">
-            <div className="condition-icon">
-              <Icon name={status.key === 'unavailable' ? 'wifi-off' : status.key === 'fault' ? 'triangle' : 'flood'} />
-            </div>
-            <div className="condition-copy">
-              <h3>{status.label}</h3>
-              <p>{status.level === null ? 'Current level unconfirmed'
-                : status.level === 0 ? 'Below first threshold' : `Level ${status.level} reached`}</p>
-            </div>
-          </div>
-        </div>
-        <div className="measure-cards">
-          <div className="measure-card">
-            <Icon name="waves" />
-            <div>
-              <p>Latest water level</p>
-              <strong>{status.level === null ? 'Unavailable' : `Level ${status.level} / 3`}</strong>
+        <div className="detail-summary">
+          <div className="condition-and-trend">
+            <div className="condition-card">
+              <div className="condition-icon">
+                <Icon name={status.key === 'unavailable' ? 'wifi-off' : status.key === 'fault' ? 'triangle' : 'flood'} />
+              </div>
+              <div className="condition-copy">
+                <h3>{status.label}</h3>
+                <p>{status.level === null ? 'Current level unconfirmed'
+                  : status.level === 0 ? 'Below first threshold' : `Level ${status.level} reached`}</p>
+              </div>
             </div>
           </div>
+          <div className="measure-cards">
+            <div className="measure-card">
+              <Icon name="waves" />
+              <div>
+                <p>Latest water level</p>
+                <strong>{status.level === null ? 'Unavailable' : `Level ${status.level} / 3`}</strong>
+              </div>
+            </div>
+          </div>
+          <p className="measure-disclaimer">
+            Readings reflect fixed water-level thresholds. Below threshold does not mean a road is safe.
+            An old or faulty reading cannot confirm current conditions.
+          </p>
         </div>
-        <p className="measure-disclaimer">
-          Readings reflect fixed water-level thresholds. Below threshold does not mean a road is safe.
-          An old or faulty reading cannot confirm current conditions.
-        </p>
-        <section className="detail-section">
+        <section className="detail-section detail-observation">
           <h3 className="device-heading">Sensor observation</h3>
           <div className="probe-grid">
             {node.probes.map((wet, index) => (
@@ -110,7 +112,7 @@ export function NodeDetails() {
           </dl>
         </section>
         {f.nearby.length > 0 && (
-          <section className="detail-section">
+          <section className="detail-section detail-nearby">
             <div className="section-line"><h3>Nearby monitoring points</h3><span>Within 3 km</span></div>
             {f.nearby.map(near => (
               <button className="nearby-row" key={near.id} onClick={() => f.selectNode(near.id)}>
