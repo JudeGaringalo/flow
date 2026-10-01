@@ -13,7 +13,15 @@ import type { Basemap, Connection, FlowNode, Level, ModalKind, StatusKey } from 
 type Toast = { id: number; text: string; error: boolean; alertLevel?: Level };
 const basemapKey = `flow-next:basemap:${encodeURIComponent(config.supabaseUrl)}`;
 const pushDisabledKey = 'flow-next:push-disabled';
+const locationEnabledKey = 'flow-next:location-enabled';
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+
+function currentPosition() {
+  return new Promise<GeolocationPosition>((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false, maximumAge: 60000, timeout: 15000
+    }));
+}
 
 function pushApplicationKey(value: string) {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -61,6 +69,7 @@ function useFlowController() {
   const [connection, setConnection] = useState<Connection>(config.configured ? 'loading' : 'unconfigured');
   const [connectionError, setConnectionError] = useState('');
   const [alertLocation, setAlertLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationChecking, setLocationChecking] = useState(true);
   const [locationError, setLocationError] = useState('');
   const [locationWorking, setLocationWorking] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
@@ -99,16 +108,17 @@ function useFlowController() {
       catch { return 'denied'; }
     })();
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false, maximumAge: 60000, timeout: 15000
-        }));
+      const position = await currentPosition();
       if (!mounted.current) return;
       setAlertLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+      try { localStorage.setItem(locationEnabledKey, '1'); } catch { }
     } catch (error) {
       if (!mounted.current) return;
       const blocked = (error as GeolocationPositionError)?.code === 1;
-      if (blocked) setAlertLocation(null);
+      if (blocked) {
+        setAlertLocation(null);
+        try { localStorage.removeItem(locationEnabledKey); } catch { }
+      }
       setLocationError(blocked
         ? 'Location is blocked. Allow it in your browser settings, then try again.'
         : 'Could not get your location. Check device location settings and try again.');
@@ -119,6 +129,47 @@ function useFlowController() {
         setLocationWorking(false);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!navigator.geolocation || !window.isSecureContext) return;
+        let granted = false;
+        try { granted = localStorage.getItem(locationEnabledKey) === '1'; } catch { }
+        if (navigator.permissions?.query) {
+          try {
+            const permission = await navigator.permissions.query({ name: 'geolocation' });
+            granted = permission.state === 'granted';
+            if (permission.state === 'denied') {
+              try { localStorage.removeItem(locationEnabledKey); } catch { }
+            }
+          } catch { /* Use the previous successful choice if permission querying is unavailable. */ }
+        }
+        if (!cancelled && granted) {
+          const position = await currentPosition();
+          if (!cancelled) {
+            setAlertLocation({
+              latitude: position.coords.latitude, longitude: position.coords.longitude
+            });
+            try { localStorage.setItem(locationEnabledKey, '1'); } catch { }
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const blocked = (error as GeolocationPositionError)?.code === 1;
+          if (blocked) {
+            try { localStorage.removeItem(locationEnabledKey); } catch { }
+          }
+          setLocationError(blocked
+            ? 'Location access changed. Allow it in your browser settings, then try again.'
+            : 'Could not get your location. Check device location settings and try again.');
+        }
+      }
+      finally { if (!cancelled) setLocationChecking(false); }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const refreshLive = useCallback(async () => {
@@ -188,6 +239,7 @@ function useFlowController() {
       error => {
         if (error.code === error.PERMISSION_DENIED) {
           setAlertLocation(null);
+          try { localStorage.removeItem(locationEnabledKey); } catch { }
           setLocationError('Location is blocked. Allow it in your browser settings, then try again.');
         }
       },
@@ -375,7 +427,8 @@ function useFlowController() {
     ready, now, nodes, selectedId, selected, query, setQuery, filter, setFilter,
     expanded, setExpanded, basemap, setBasemap, modal, setModal,
     toasts, notify, online, connection, connectionError, offline,
-    alertLocation, locationError, locationWorking, notificationPermission, requestAlertLocation,
+    alertLocation, locationChecking, locationError, locationWorking,
+    notificationPermission, requestAlertLocation,
     pushStatus, pushError, turnOffBackgroundAlerts, turnOnBackgroundAlerts,
     getStatus, visibleNodes, nearby, selectNode, closeDetails, refreshLive,
     age: (node: FlowNode) => ageText(node.last_seen, now)
