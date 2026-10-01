@@ -10,6 +10,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
+import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import type { ExpressionSpecification, GeoJSONSource, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup } from 'maplibre-gl';
 
 import { Icon } from './icon';
@@ -38,6 +39,8 @@ const MAP_LIMITS: [[number, number], [number, number]] = [
 ];
 
 const HEAT_SOURCE_ID = 'flow-sensor-heat';
+const HAZARD_SOURCE_ID = 'flow-noah-hazard';
+const HAZARD_LAYER_ID = 'flow-noah-hazard-fill';
 const EVAC_SOURCE_ID = 'flow-evacuation-sites';
 const EVAC_SITE_ID = 'flow-evacuation-points';
 const EVAC_ICON_ID = 'flow-evacuation-icon';
@@ -49,6 +52,82 @@ const BUILDINGS_3D_ID = 'flow-buildings-3d';
 const CITY_PITCH = 60;
 const CITY_BEARING = -17;
 const FOCUS_ZOOM = 17;
+const HAZARD_BOUNDS = [120.85, 14.32, 121.30, 14.86] as const;
+const NOAH_QUERY = 'https://services1.arcgis.com/IwZZTMxZCmAmFYvF/ArcGIS/rest/services/Flood_Control_5_Year/FeatureServer/0/query';
+
+export type HazardState = 'off' | 'loading' | 'ready' | 'empty' | 'zoom' | 'unavailable';
+
+function emptyHazard(): FeatureCollection<Polygon | MultiPolygon> {
+  return { type: 'FeatureCollection', features: [] };
+}
+
+async function fetchNoahDirectly(box: string, signal: AbortSignal) {
+  const params = new URLSearchParams({
+    where: '1=1', geometry: box,
+    geometryType: 'esriGeometryEnvelope', spatialRel: 'esriSpatialRelIntersects',
+    inSR: '4326', outSR: '4326', returnCountOnly: 'true', f: 'json',
+  });
+  const countResponse = await fetch(`${NOAH_QUERY}?${params}`, { signal });
+  if (!countResponse.ok) throw new Error('NOAH count unavailable');
+  const countData: unknown = await countResponse.json();
+  if (!countData || typeof countData !== 'object' || !('count' in countData) ||
+      typeof countData.count !== 'number' || !Number.isSafeInteger(countData.count) ||
+      countData.count < 0) throw new Error('Invalid NOAH count');
+  if (countData.count > 2000) return { tooMany: true as const };
+  if (countData.count === 0) return { tooMany: false as const, data: emptyHazard() };
+
+  params.delete('returnCountOnly');
+  params.set('outFields', 'Var');
+  params.set('returnGeometry', 'true');
+  params.set('resultRecordCount', '2000');
+  params.set('maxAllowableOffset', '0.00002');
+  params.set('geometryPrecision', '5');
+  params.set('f', 'geojson');
+  const response = await fetch(`${NOAH_QUERY}?${params}`, { signal });
+  if (!response.ok) throw new Error('NOAH geometry unavailable');
+  const data: unknown = await response.json();
+  if (!data || typeof data !== 'object' || !('type' in data) ||
+      data.type !== 'FeatureCollection' || !('features' in data) ||
+      !Array.isArray(data.features) || data.features.length !== countData.count ||
+      'error' in data || ('exceededTransferLimit' in data && data.exceededTransferLimit))
+    throw new Error('Incomplete NOAH geometry');
+  return { tooMany: false as const, data: data as FeatureCollection<Polygon | MultiPolygon> };
+}
+
+function addHazardLayer(instance: LibreMap, data: FeatureCollection<Polygon | MultiPolygon>,
+  visible: boolean) {
+  if (!instance.getSource(HAZARD_SOURCE_ID)) {
+    instance.addSource(HAZARD_SOURCE_ID, { type: 'geojson', data });
+  }
+  if (!instance.getLayer(HAZARD_LAYER_ID)) {
+    const layers = instance.getStyle().layers;
+    const beforeId = layers.find(layer =>
+      (layer.type === 'fill' || layer.type === 'fill-extrusion') &&
+      'source-layer' in layer && layer['source-layer'] === 'building')?.id
+      ?? layers.find(layer => layer.type === 'symbol')?.id;
+    instance.addLayer({
+      id: HAZARD_LAYER_ID,
+      type: 'fill',
+      source: HAZARD_SOURCE_ID,
+      paint: {
+        'fill-color': ['match', ['to-number', ['get', 'Var']], 1, '#f3c949',
+          2, '#f08350', 3, '#d9434b', 'rgba(0,0,0,0)'],
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, .7, 15, .8, 18, .84],
+      },
+      layout: { visibility: visible ? 'visible' : 'none' },
+    }, beforeId);
+  }
+}
+
+function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolean) {
+  if (instance.getLayer(HAZARD_LAYER_ID))
+    instance.setLayoutProperty(HAZARD_LAYER_ID, 'visibility', hazardVisible ? 'visible' : 'none');
+  for (const level of [1, 2, 3]) {
+    const id = `flow-sensor-heat-${level}`;
+    if (instance.getLayer(id))
+      instance.setLayoutProperty(id, 'visibility', hazardVisible ? 'none' : 'visible');
+  }
+}
 
 function heatPalette(red: number, green: number, blue: number): ExpressionSpecification {
   const color = (alpha: number) => `rgba(${red},${green},${blue},${alpha})`;
@@ -262,7 +341,10 @@ export const MapCanvas = forwardRef<MapHandle, {
   onFlatViewChange: (flat: boolean) => void;
   evacuationSites: MappedEvacuationSite[];
   showEvacuationSites: boolean;
-}>(function MapCanvas({ onFlatViewChange, evacuationSites, showEvacuationSites }, ref) {
+  showHazard: boolean;
+  onHazardStateChange: (state: HazardState) => void;
+}>(function MapCanvas({ onFlatViewChange, evacuationSites, showEvacuationSites,
+  showHazard, onHazardStateChange }, ref) {
   const flow = useFlow();
   const latest = useRef(flow);
   latest.current = flow;
@@ -272,6 +354,14 @@ export const MapCanvas = forwardRef<MapHandle, {
   sitesRef.current = evacuationSites;
   const sitesVisibleRef = useRef(showEvacuationSites);
   sitesVisibleRef.current = showEvacuationSites;
+  const hazardVisibleRef = useRef(showHazard);
+  hazardVisibleRef.current = showHazard;
+  const hazardStateChange = useRef(onHazardStateChange);
+  hazardStateChange.current = onHazardStateChange;
+  const hazardData = useRef<FeatureCollection<Polygon | MultiPolygon>>(emptyHazard());
+  const hazardRequest = useRef<AbortController | null>(null);
+  const hazardRequestId = useRef(0);
+  const hazardBoundsKey = useRef('');
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<LibreMap | null>(null);
@@ -290,12 +380,96 @@ export const MapCanvas = forwardRef<MapHandle, {
   const [mapIssue, setMapIssue] = useState('');
   const [retry, setRetry] = useState(0);
   const lastFocused = useRef<string | null>(null);
-  const initialNodeCentered = useRef(false);
   const viewTransitioning = useRef<number | null>(null);
   const nextViewTransition = useRef(0);
   const previousTilt = useRef<{
     center: [number, number]; zoom: number; pitch: number; bearing: number;
   } | null>(null);
+
+  const refreshHazard = useCallback((instance: LibreMap) => {
+    if (!hazardVisibleRef.current || !instance.getSource(HAZARD_SOURCE_ID)) return;
+    const clear = (key: string) => {
+      hazardData.current = emptyHazard();
+      const source = instance.getSource(HAZARD_SOURCE_ID) as GeoJSONSource | undefined;
+      if (source) void source.setData(hazardData.current);
+      hazardBoundsKey.current = key;
+      setObservationLayerVisibility(instance, false);
+    };
+    if (instance.getZoom() < 12.5) {
+      if (hazardBoundsKey.current === '#zoom') return;
+      hazardRequest.current?.abort();
+      ++hazardRequestId.current;
+      clear('#zoom');
+      hazardStateChange.current('zoom');
+      return;
+    }
+    const bounds = instance.getBounds();
+    const box = [
+      Math.max(bounds.getWest(), HAZARD_BOUNDS[0]),
+      Math.max(bounds.getSouth(), HAZARD_BOUNDS[1]),
+      Math.min(bounds.getEast(), HAZARD_BOUNDS[2]),
+      Math.min(bounds.getNorth(), HAZARD_BOUNDS[3]),
+    ];
+    if (box[0] >= box[2] || box[1] >= box[3]) {
+      if (hazardBoundsKey.current === '#outside') return;
+      hazardRequest.current?.abort();
+      ++hazardRequestId.current;
+      clear('#outside');
+      hazardStateChange.current('empty');
+      return;
+    }
+    const key = box.map(value => value.toFixed(5)).join(',');
+    if (key === hazardBoundsKey.current) return;
+    hazardRequest.current?.abort();
+    const id = ++hazardRequestId.current;
+    clear(key);
+    hazardStateChange.current('loading');
+    const controller = new AbortController();
+    hazardRequest.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 18_000);
+    void fetch(`/api/flood-hazard?bbox=${encodeURIComponent(key)}`, { signal: controller.signal })
+      .then(async response => {
+        if (response.status === 422) {
+          if (hazardRequestId.current === id) {
+            clear(key);
+            hazardStateChange.current('zoom');
+          }
+          return;
+        }
+        let data: FeatureCollection<Polygon | MultiPolygon>;
+        if (response.status === 404) {
+          const direct = await fetchNoahDirectly(key, controller.signal);
+          if (direct.tooMany) {
+            if (hazardRequestId.current === id) {
+              clear(key);
+              hazardStateChange.current('zoom');
+            }
+            return;
+          }
+          data = direct.data;
+        } else {
+          if (!response.ok) throw new Error('Hazard map unavailable');
+          data = await response.json();
+        }
+        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features))
+          throw new Error('Invalid hazard map');
+        if (hazardRequestId.current !== id || map.current !== instance) return;
+        hazardData.current = data;
+        const current = instance.getSource(HAZARD_SOURCE_ID) as GeoJSONSource | undefined;
+        if (current) void current.setData(data);
+        setObservationLayerVisibility(instance, hazardVisibleRef.current && data.features.length > 0);
+        hazardStateChange.current(data.features.length ? 'ready' : 'empty');
+      })
+      .catch(() => {
+        if (hazardRequestId.current !== id) return;
+        clear(key);
+        hazardStateChange.current('unavailable');
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (hazardRequest.current === controller) hazardRequest.current = null;
+      });
+  }, []);
 
 
   const focus = useCallback((id: string) => {
@@ -549,9 +723,18 @@ export const MapCanvas = forwardRef<MapHandle, {
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current, siteIcon);
         };
         siteIcon.src = '/assets/evacuation-marker.svg';
+        const location = latest.current.alertLocation;
+        const inPhilippines = location &&
+          Number.isFinite(location.longitude) && Number.isFinite(location.latitude) &&
+          location.longitude >= PHILIPPINES_BOUNDS[0][0] &&
+          location.longitude <= PHILIPPINES_BOUNDS[1][0] &&
+          location.latitude >= PHILIPPINES_BOUNDS[0][1] &&
+          location.latitude <= PHILIPPINES_BOUNDS[1][1];
+        const initialCenter: [number, number] = inPhilippines
+          ? [location.longitude, location.latitude] : METRO_MANILA_CENTER;
         instance = new lib.Map({
           container: container.current,
-          center: METRO_MANILA_CENTER,
+          center: initialCenter,
           zoom: 15,
           pitch: CITY_PITCH,
           bearing: CITY_BEARING,
@@ -574,6 +757,14 @@ export const MapCanvas = forwardRef<MapHandle, {
           style,
         });
         map.current = instance;
+        if (inPhilippines) {
+          const element = document.createElement('div');
+          element.className = 'user-dot';
+          element.title = 'Your location';
+          userMarker.current = new lib.Marker({ element })
+            .setLngLat(initialCenter)
+            .addTo(instance);
+        }
         viewTransitioning.current = null;
         flatViewChange.current(instance.getPitch() <= 1);
         appliedStyle.current = { basemap: initialMode, retry };
@@ -581,8 +772,12 @@ export const MapCanvas = forwardRef<MapHandle, {
           if (instance) {
             selectedFootprintKey.current = '';
             addHeatLayers(instance, latest.current);
+            const hazardReady = hazardVisibleRef.current && hazardData.current.features.length > 0;
+            addHazardLayer(instance, hazardData.current, hazardReady);
+            setObservationLayerVisibility(instance, hazardReady);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
+            if (hazardVisibleRef.current) refreshHazard(instance);
           }
         });
         instance.on('click', EVAC_SITE_ID, event => {
@@ -609,10 +804,13 @@ export const MapCanvas = forwardRef<MapHandle, {
           }
           flatViewChange.current(instance.getPitch() <= 1);
           if (selectedEvacuationId.current) refreshSelectedFootprint(instance);
+          if (hazardVisibleRef.current) refreshHazard(instance);
         });
         instance.on('idle', () => {
           if (!cancelled && instance && selectedEvacuationId.current)
             refreshSelectedFootprint(instance);
+          if (!cancelled && instance && hazardVisibleRef.current)
+            refreshHazard(instance);
         });
         const updateZoomTier = () => {
           if (!instance) return;
@@ -651,6 +849,9 @@ export const MapCanvas = forwardRef<MapHandle, {
     void initialize();
     return () => {
       cancelled = true;
+      hazardRequest.current?.abort();
+      ++hazardRequestId.current;
+      hazardBoundsKey.current = '';
       controller.abort();
       clearTimeout(timeout);
       observer?.disconnect();
@@ -665,31 +866,35 @@ export const MapCanvas = forwardRef<MapHandle, {
       instance?.remove();
       map.current = null;
       appliedStyle.current = null;
-      initialNodeCentered.current = false;
       previousTilt.current = null;
       viewTransitioning.current = null;
     };
-  }, [flow.ready, retry, focusEvacuation, refreshSelectedFootprint]);
-
+  }, [flow.ready, retry, focusEvacuation, refreshSelectedFootprint, refreshHazard]);
 
   useEffect(() => {
     const instance = map.current;
-    if (!engineVersion || !instance || initialNodeCentered.current || !flow.nodes.length) return;
-    const node = flow.nodes.filter((item) =>
-      Number.isFinite(item.latitude) && Number.isFinite(item.longitude) &&
-      item.longitude >= PHILIPPINES_BOUNDS[0][0] &&
-      item.longitude <= PHILIPPINES_BOUNDS[1][0] &&
-      item.latitude >= PHILIPPINES_BOUNDS[0][1] &&
-      item.latitude <= PHILIPPINES_BOUNDS[1][1])
-      .sort((a, b) =>
-        (a.longitude - METRO_MANILA_CENTER[0]) ** 2 +
-        (a.latitude - METRO_MANILA_CENTER[1]) ** 2 -
-        (b.longitude - METRO_MANILA_CENTER[0]) ** 2 -
-        (b.latitude - METRO_MANILA_CENTER[1]) ** 2)[0];
-    if (!node) return;
-    initialNodeCentered.current = true;
-    if (!flow.selectedId) instance.easeTo({ center: [node.longitude, node.latitude], duration: 320 });
-  }, [engineVersion, flow.nodes, flow.selectedId]);
+    const lib = library.current;
+    const location = flow.alertLocation;
+    if (!engineVersion || !instance || !lib || !location) return;
+    const { latitude, longitude } = location;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+        longitude < PHILIPPINES_BOUNDS[0][0] || longitude > PHILIPPINES_BOUNDS[1][0] ||
+        latitude < PHILIPPINES_BOUNDS[0][1] || latitude > PHILIPPINES_BOUNDS[1][1]) {
+      userMarker.current?.remove();
+      userMarker.current = null;
+      return;
+    }
+    if (userMarker.current) {
+      userMarker.current.setLngLat([longitude, latitude]);
+    } else {
+      const element = document.createElement('div');
+      element.className = 'user-dot';
+      element.title = 'Your location';
+      userMarker.current = new lib.Marker({ element })
+        .setLngLat([longitude, latitude])
+        .addTo(instance);
+    }
+  }, [engineVersion, flow.alertLocation]);
 
   useEffect(() => {
     if (!engineVersion || !map.current) return;
@@ -712,8 +917,12 @@ export const MapCanvas = forwardRef<MapHandle, {
           const currentStyle = instance.getStyle();
           if (currentStyle?.name === style.name && currentStyle.layers?.length) {
             addHeatLayers(instance, latest.current);
+            const hazardReady = hazardVisibleRef.current && hazardData.current.features.length > 0;
+            addHazardLayer(instance, hazardData.current, hazardReady);
+            setObservationLayerVisibility(instance, hazardReady);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
+            if (hazardVisibleRef.current) refreshHazard(instance);
           }
         }
       })
@@ -729,7 +938,20 @@ export const MapCanvas = forwardRef<MapHandle, {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [engineVersion, flow.basemap, retry]);
+  }, [engineVersion, flow.basemap, retry, refreshHazard]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!engineVersion || !instance) return;
+    setObservationLayerVisibility(instance, showHazard && hazardData.current.features.length > 0);
+    if (showHazard) refreshHazard(instance);
+    else {
+      hazardRequest.current?.abort();
+      ++hazardRequestId.current;
+      hazardBoundsKey.current = '';
+      hazardStateChange.current('off');
+    }
+  }, [engineVersion, showHazard, refreshHazard]);
 
   useEffect(() => {
     const instance = map.current;
