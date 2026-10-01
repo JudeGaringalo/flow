@@ -1,5 +1,5 @@
-// Sends an actual authenticated TEST message to YOUR Supabase ingestion endpoint.
-// Use only with your dedicated test node, never to fake readings on a deployed node.
+
+
 import { randomUUID } from 'node:crypto';
 
 const level = Number(process.argv[2] ?? 0);

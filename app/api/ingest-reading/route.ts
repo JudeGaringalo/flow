@@ -1,5 +1,6 @@
 import { ApiError, failure, getServerDb, hashToken, json, readJson } from '@/lib/server/runtime';
 import { readingBody } from '@/lib/server/validation';
+import { after } from 'next/server';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +27,13 @@ export async function POST(req: Request) {
       throw new ApiError(401, 'Unauthorized');
     if (error)
       throw error;
+
+    if (data?.accepted === true) {
+      after(async () => {
+        const { dispatchNearbyAlerts } = await import('@/lib/server/push');
+        await dispatchNearbyAlerts(body.device_id, body.message_id);
+      });
+    }
 
     return json(data);
   }

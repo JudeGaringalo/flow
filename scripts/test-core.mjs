@@ -2,7 +2,7 @@ import ts from 'typescript';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
-// Test the SAME TypeScript sensor logic that the React application imports.
+
 const text = await readFile(new URL('../lib/core.ts', import.meta.url), 'utf8');
 
 const compiled = ts.transpileModule(text, {
@@ -60,6 +60,28 @@ test('Malformed probes rejected', () => {
 });
 
 test('Fresh below-threshold state', () => assert.equal(C.nodeStatus(base, now).key, 'below'));
+
+test('Nearby rising threshold produces one alert', () => {
+  const wet = { ...base, probes: [true, false, false], current_level: 1,
+    state_version: 2, last_seen: new Date(now + 1000).toISOString() };
+  const alerts = C.risingNearbyAlerts([base], [wet], { latitude: 14.501, longitude: 121 }, now);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].level, 1);
+  assert.equal(C.risingNearbyAlerts([wet], [wet], { latitude: 14.501, longitude: 121 }, now).length, 0);
+});
+
+test('Initial, distant, stale, faulty, and falling readings do not alert', () => {
+  const position = { latitude: 14.5, longitude: 121 };
+  const wet = { ...base, probes: [true, true, false], current_level: 2,
+    state_version: 2, last_seen: new Date(now + 1000).toISOString() };
+  assert.equal(C.risingNearbyAlerts([], [wet], position, now).length, 0);
+  assert.equal(C.risingNearbyAlerts([base], [{ ...wet, latitude: 15 }], position, now).length, 0);
+  assert.equal(C.risingNearbyAlerts([base], [{ ...wet, last_seen: new Date(now - 121000).toISOString() }],
+    position, now).length, 0);
+  assert.equal(C.risingNearbyAlerts([base], [{ ...wet, quality: 'fault' }], position, now).length, 0);
+  assert.equal(C.risingNearbyAlerts([wet], [{ ...base, state_version: 3 }], position, now).length, 0);
+  assert.equal(C.risingNearbyAlerts([base], [{ ...wet, last_seen: base.last_seen }], position, now).length, 0);
+});
 
 test(
   'Fresh highest valid threshold',

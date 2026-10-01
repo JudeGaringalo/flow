@@ -23,8 +23,8 @@ export function readingBody(body: Record<string, unknown>) {
   if (firmware !== null && (typeof firmware !== 'string' || firmware.length > 40))
     throw new ApiError(400, 'Invalid firmware version');
 
-  // Invalid physical combinations are recorded as a sensor fault by the database,
-  // never discarded or converted into a claimed safe/below-threshold reading.
+
+
   return {
     device_id: body.device_id,
     message_id: body.message_id,

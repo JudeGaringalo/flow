@@ -3,13 +3,13 @@
   "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "FLOW public ESP32 flood monitoring map with one Supabase sensor table",
+  "description": "FLOW public flood observation map with recorded evacuation sites",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test-core.mjs && node scripts/test-live-only.mjs && node scripts/test-node-api.mjs",
+    "test": "node scripts/test-core.mjs && node scripts/test-live-only.mjs && node scripts/test-node-api.mjs && node scripts/test-background-push.mjs",
     "check": "npm run typecheck && npm test && npm run build",
     "send-reading": "node scripts/send-reading.mjs",
     "check:syntax": "node scripts/check-syntax.mjs"
@@ -23,12 +23,14 @@
     "next": "16.3.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/web-push": "3.6.4",
     "typescript": "5.9.3"
   }
 }

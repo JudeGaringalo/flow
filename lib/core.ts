@@ -120,6 +120,29 @@ export function distance(
 
 export const distanceText = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 10) * 10} m`;
 
+export function risingNearbyAlerts(
+  previous: FlowNode[],
+  current: FlowNode[],
+  location: { latitude: number; longitude: number },
+  now: number,
+  radiusMeters = 3000
+): { node: FlowNode; level: Level; distanceMeters: number }[] {
+  const old = new Map(previous.map(node => [node.id, node]));
+  return current.flatMap(node => {
+    const before = old.get(node.id);
+    if (!before || node.quality !== 'valid') return [];
+    const level = levelFromProbes(node.probes);
+    const priorLevel = before.quality === 'valid' ? levelFromProbes(before.probes) : null;
+    if (level === null || level < 1 || priorLevel === null || level <= priorLevel) return [];
+    if (node.last_seen === before.last_seen) return [];
+    const age = now - Date.parse(node.last_seen || '');
+    if (!Number.isFinite(age) || age < -30000 || age > 120000) return [];
+    const distanceMeters = distance(location, node);
+    return Number.isFinite(distanceMeters) && distanceMeters <= radiusMeters
+      ? [{ node, level, distanceMeters }] : [];
+  });
+}
+
 export function normalizeNode(raw: Record<string, unknown>): FlowNode {
   const validProbes = Array.isArray(raw.probes) && raw.probes.length === 3
     && raw.probes.every(p => typeof p === 'boolean');

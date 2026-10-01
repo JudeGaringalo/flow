@@ -1,19 +1,6 @@
-# FLOW: ESP32 flood observations on a public map
+# FLOW
 
-FLOW is a Next.js map of the latest reading from each registered ESP32. Everyone
-can view the sensor map without signing in. The menu contains Install FLOW (the
-web app) and About observations. The map is centered on Metro Manila and can zoom
-out as far as the Philippines.
-
-There is **one FLOW application table**: `public.flow_nodes`. It contains the
-registered location, latest three threshold probes, last report time and a
-private device-token hash. Public database permissions exclude the token hash.
-
-The private `POST /api/register-node` route registers/edits sensors using a
-server-only installer secret. The ESP32 sends its token and reading to
-`POST /api/ingest-reading`. The database checks the token and updates the latest
-row; Realtime tells open maps to refresh. No historical readings, notifications,
-AI summaries, saved locations, FLOW admin accounts or rate-limit tables are used.
+FLOW is a Next.js public map of current readings from registered monitoring devices and recorded evacuation site candidates. The map opens in Metro Manila. Site listings may be incomplete or outdated; confirm availability with the local disaster office.
 
 ## Start
 
@@ -22,21 +9,10 @@ npm install
 npm run dev
 ```
 
-Copy `.env.example` to `.env.local` and configure the Supabase URL, public key,
-private server key and a private installer secret. For sensor registration and
-firmware requests, see [live setup](docs/LIVE_SETUP.md).
+Copy `.env.example` to `.env.local` and enter your own project values. Never commit `.env.local`. The hosted Supabase database must already contain `public.flow_nodes`, `public.flow_evacuation_sites`, and the server functions used by the device routes.
 
-The one-table schema must be applied to your hosted Supabase project before the
-app runs. Once it has been applied, the local `supabase/` directory of SQL files
-can be deleted; neither the app nor its build reads it. Check the hosted database
-using the query in [live setup](docs/LIVE_SETUP.md). Removing the local directory
-does not drop existing database tables.
+Deploy this version before applying `remove-evacuation-source-urls.sql` to an existing database. That SQL removes only the evacuation site source URL column; it keeps the site records. The map no longer displays a per-site source link. Map and dataset attribution remains where required.
 
-The one-table migration for an existing project keeps the latest sensor row and
-copies device-token hashes before dropping the other FLOW tables. The Supabase
-platform may have its own tables under `auth` and `realtime`; those are not FLOW
-tables.
+Run `npm run check` before deployment. Test sensor reporting and the hosted database separately.
 
-Run `npm run check` before deployment. TypeScript and API tests use local mocks;
-verify real hardware and Supabase separately. Stale or faulty readings do not
-establish that a road is safe.
+The interface icon paths are adapted from Lucide (ISC license).

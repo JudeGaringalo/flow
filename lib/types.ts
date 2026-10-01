@@ -41,6 +41,7 @@ export interface NodeStatus {
 
 export interface MapHandle {
   focus: (id: string) => void;
+  focusEvacuation: (id: string) => void;
   fit: () => void;
   restoreTilt: () => void;
   showPhilippines: () => void;
@@ -48,4 +49,4 @@ export interface MapHandle {
   locate: (latitude: number, longitude: number, accuracy: number) => boolean;
 }
 
-export type ModalKind = 'menu' | 'layers' | 'about' | 'install' | 'directions';
+export type ModalKind = 'menu' | 'layers' | 'about' | 'install' | 'directions' | 'alerts' | 'evacuation';

@@ -4,15 +4,28 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFlow } from '@/hooks/use-flow';
 import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS } from '@/lib/core';
+import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
 import { Icon } from './icon';
+import { AlertSettings } from './alert-settings';
 import type { MapHandle, ModalKind, StatusKey } from '@/lib/types';
 
 const TITLES: Record<ModalKind, string> = {
   menu: 'FLOW', layers: 'Map layers', about: 'About observations',
-  install: 'Install FLOW', directions: 'Open directions'
+  install: 'Install FLOW', directions: 'Open directions', alerts: 'Nearby alerts',
+  evacuation: 'Mapped evacuation sites',
 };
 
-export function Dialogs({ mapRef }: { mapRef: React.RefObject<MapHandle | null> }) {
+interface DialogProps {
+  mapRef: React.RefObject<MapHandle | null>;
+  evacuationSites: MappedEvacuationSite[];
+  showEvacuationSites: boolean;
+  setShowEvacuationSites: (visible: boolean) => void;
+  siteState: 'loading' | 'ready' | 'error';
+  onRetrySites: () => void;
+  onSelectEvacuation: (id: string) => void;
+}
+
+export function Dialogs(props: DialogProps) {
   const f = useFlow();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -38,15 +51,19 @@ export function Dialogs({ mapRef }: { mapRef: React.RefObject<MapHandle | null> 
         </button>
       </div>
       <div className="dialog-body">
-        {f.modal && <Content key={f.modal} kind={f.modal} mapRef={mapRef} />}
+        {f.modal && <Content key={f.modal} kind={f.modal} {...props} />}
       </div>
     </dialog>
   );
 }
 
-function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<MapHandle | null> }) {
+function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
+  setShowEvacuationSites, siteState, onRetrySites, onSelectEvacuation }:
+  DialogProps & { kind: ModalKind }) {
   const f = useFlow();
   if (kind === 'menu') return <Menu />;
+  if (kind === 'evacuation') return <EvacuationDirectory sites={evacuationSites}
+    state={siteState} onRetry={onRetrySites} onSelect={onSelectEvacuation} />;
   if (kind === 'layers') return (
     <>
       <p>Choose a map view. Street and place labels use the same source in every view.</p>
@@ -60,6 +77,18 @@ function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<Ma
           </button>
         ))}
       </div>
+      <h3>Evacuation sites</h3>
+      <p>Recorded candidate sites across NCR. Opening status and flood safety are not verified.</p>
+      <button className="evacuation-layer-toggle" type="button"
+        aria-pressed={showEvacuationSites}
+        onClick={() => setShowEvacuationSites(!showEvacuationSites)}>
+        <span className="evacuation-key-dot" aria-hidden="true"><Icon name="shelter" /></span>
+        {showEvacuationSites ? 'Hide mapped sites' : 'Show mapped sites'}
+        <strong>{evacuationSites.length}</strong>
+      </button>
+      <button className="text-btn" type="button" onClick={() => f.setModal('evacuation')}>
+        Browse mapped sites <Icon name="chevron" />
+      </button>
       <h3>FLOW markers</h3>
       <p>Filter monitoring points without changing the basemap.</p>
       <div className="layer-options">
@@ -78,6 +107,7 @@ function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<Ma
     </>
   );
   if (kind === 'directions') return <Directions />;
+  if (kind === 'alerts') return <AlertSettings />;
   if (kind === 'install') return <InstallHelp />;
   return (
     <>
@@ -88,9 +118,45 @@ function Content({ kind, mapRef }: { kind: ModalKind; mapRef: React.RefObject<Ma
         sensor cannot confirm the current condition. FLOW does not measure continuous depth or rainfall.</p>
       <p>The device reports three threshold levels. No simulated flood data is shown.</p>
       <p className="map-data-credit">Streets and labels: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors.
-        Satellite imagery: Esri and its imagery contributors. Source credits also appear on the map.</p>
+        Satellite imagery: Esri and its imagery contributors.</p>
     </>
   );
+}
+
+function EvacuationDirectory({ sites, state, onRetry, onSelect }: {
+  sites: MappedEvacuationSite[];
+  state: 'loading' | 'ready' | 'error';
+  onRetry: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const term = query.trim().toLowerCase();
+  const matches = term ? sites.filter(site =>
+    `${site.name} ${site.city}`.toLowerCase().includes(term)) : sites;
+  return <div className="evacuation-directory">
+    <p>Saved site locations, initially from OpenStreetMap. The list may be incomplete or outdated.
+      Confirm a site is open and your route is safe with your local disaster office.</p>
+    {state === 'loading' && <p role="status">Loading recorded sites…</p>}
+    {state === 'error' && <div role="status">
+      <p>Site data could not load. Check your connection and try again.</p>
+      <button type="button" className="secondary-btn" onClick={onRetry}>Retry site map</button>
+    </div>}
+    {state === 'ready' && <>
+      <label htmlFor="evacuation-search">Search {sites.length} mapped sites</label>
+      <input id="evacuation-search" type="search" value={query}
+        placeholder="Name or city" onChange={event => setQuery(event.target.value)} />
+      {matches.length === 0 && <p role="status">{sites.length ? 'No matching mapped sites.' : 'No sites have been recorded yet.'}</p>}
+      {matches.length > 0 && <div className="evacuation-directory-list">
+        {matches.slice(0, 80).map(site => <button type="button" key={site.id}
+          onClick={() => onSelect(site.id)}>
+          <Icon name="shelter" />
+          <span><strong>{site.name}</strong><small>{site.city}</small></span>
+          <Icon name="chevron" />
+        </button>)}
+      </div>}
+      {matches.length > 80 && <p>Showing 80 of {matches.length}. Search by name or city for more.</p>}
+    </>}
+  </div>;
 }
 
 function Menu() {
@@ -98,6 +164,9 @@ function Menu() {
   const installed = useInstalledApp();
   return (
     <div className="menu-list">
+      <button type="button" onClick={() => f.setModal('alerts')}>
+        <Icon name="bell" />Nearby alerts<Icon name="chevron" />
+      </button>
       {!installed && <button type="button" onClick={() => f.setModal('install')}>
         <Icon name="download" />Install FLOW<Icon name="chevron" />
       </button>}

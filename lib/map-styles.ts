@@ -6,10 +6,10 @@ import type {
 
 import type { Basemap } from './types';
 
-/**
- * One vector source and one set of labels are used across both basemaps.
- * Satellite adds imagery below the same street and place labels.
- */
+
+
+
+
 const VECTOR_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 const IMAGERY_TILES =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -29,7 +29,7 @@ function sourceLayer(layer: LayerSpecification): string {
   return 'source-layer' in layer ? String(layer['source-layer']) : '';
 }
 
-/** Recolor the renderer, not the geographic data or road-name expressions. */
+
 function styleLayer(
   original: LayerSpecification,
   mode: Basemap,
@@ -98,14 +98,12 @@ function styleLayer(
       'text-halo-width': satellite ? 1.6 : 1.4,
       'text-halo-blur': 0.4,
     };
-    // Keep upstream text-field, filters, minzoom, text-size and collision rules.
-    // This is why the same streets retain the same names in every mode.
   }
 
   return layer;
 }
 
-/** Pure style composition; used by the map and by regression tests. */
+
 export function composeBasemap(
   input: StyleSpecification,
   mode: Basemap,

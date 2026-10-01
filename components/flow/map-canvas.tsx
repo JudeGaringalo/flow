@@ -10,10 +10,12 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { ExpressionSpecification, GeoJSONSource, LayerSpecification, Map as LibreMap, Marker as LibreMarker } from 'maplibre-gl';
+import type { ExpressionSpecification, GeoJSONSource, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup } from 'maplibre-gl';
 
+import { Icon } from './icon';
 import { useFlow } from '@/hooks/use-flow';
 import { loadBasemap } from '@/lib/map-styles';
+import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
 import type { Basemap, MapHandle } from '@/lib/types';
 
 interface MarkerHost {
@@ -21,21 +23,28 @@ interface MarkerHost {
   element: HTMLElement;
 }
 
-// The farthest zoom-out view, including the western and southern islands.
+
 const PHILIPPINES_BOUNDS: [[number, number], [number, number]] = [
   [112, 4],
   [128, 22],
 ];
-// Start near the middle of NCR at a city-level zoom.
+
 const METRO_MANILA_CENTER: [number, number] = [121.03, 14.595];
-// Give wide screens room to show the full archipelago; the camera center is
-// constrained to PHILIPPINES_BOUNDS below.
+
+
 const MAP_LIMITS: [[number, number], [number, number]] = [
   [100, -5],
   [142, 31],
 ];
 
 const HEAT_SOURCE_ID = 'flow-sensor-heat';
+const EVAC_SOURCE_ID = 'flow-evacuation-sites';
+const EVAC_SITE_ID = 'flow-evacuation-points';
+const EVAC_ICON_ID = 'flow-evacuation-icon';
+const EVAC_ICON_LAYER_ID = 'flow-evacuation-icons';
+const EVAC_FOOTPRINT_SOURCE_ID = 'flow-evacuation-footprint';
+const EVAC_FOOTPRINT_FILL_ID = 'flow-evacuation-footprint-fill';
+const EVAC_FOOTPRINT_3D_ID = 'flow-evacuation-footprint-3d';
 const BUILDINGS_3D_ID = 'flow-buildings-3d';
 const CITY_PITCH = 60;
 const CITY_BEARING = -17;
@@ -52,8 +61,8 @@ const BLUE = (alpha: number) => `rgba(20,127,200,${alpha})`;
 const YELLOW = (alpha: number) => `rgba(255,202,36,${alpha})`;
 const RED = (alpha: number) => `rgba(217,47,56,${alpha})`;
 
-// Spread each color change over a broad density range. Muted transition stops
-// avoid green and violet while the outer blue fades gradually into the map.
+
+
 const WATCH_HEAT: ExpressionSpecification = ['interpolate', ['linear'], ['heatmap-density'],
   0, BLUE(0), .04, BLUE(.02), .1, BLUE(.08), .18, BLUE(.19),
   .28, BLUE(.37), .33, BLUE(.45),
@@ -82,7 +91,7 @@ function heatData(flow: ReturnType<typeof useFlow>) {
   };
 }
 
-// Render the spread above streets, with building footprints and labels on top.
+
 function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
   if (!instance.getSource(HEAT_SOURCE_ID)) {
     instance.addSource(HEAT_SOURCE_ID, { type: 'geojson', data: heatData(flow) });
@@ -121,7 +130,7 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
       filter: ['==', ['get', 'level'], level],
       paint: {
         'heatmap-weight': 1,
-        // Let one isolated point reach the center color of its status palette.
+
         'heatmap-intensity': 2.3,
         'heatmap-color': color,
         'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
@@ -132,13 +141,13 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
     instance.addLayer(layer, beforeId);
   }
 
-  // Some styles interleave road lines and text; move every street below the heat.
+
   for (const road of roads) instance.moveLayer(road.id, 'flow-sensor-heat-1');
-  // Roof footprints remain visible, and labels stay above the color.
+
   for (const building of buildings) instance.moveLayer(building.id, beforeId);
 
-  // Liberty already supplies 3D buildings. Recolor that layer instead of
-  // drawing another extrusion under the original gray one.
+
+
   const color: ExpressionSpecification = ['interpolate', ['linear'],
     ['to-number', ['get', 'render_height'], 0],
     0, '#aeb2bb', 8, '#9aa4b6', 16, '#7895c8',
@@ -179,22 +188,103 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
   }
 }
 
-/** MapLibre draws geography. React renders only registered FLOW monitoring points. */
+function evacuationData(sites: MappedEvacuationSite[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: sites.map(site => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [site.longitude, site.latitude] },
+      properties: { id: site.id },
+    })),
+  };
+}
+
+function emptyFootprint() {
+  return { type: 'FeatureCollection' as const, features: [] };
+}
+
+function addEvacuationLayers(instance: LibreMap, sites: MappedEvacuationSite[],
+  visible: boolean, icon?: HTMLImageElement | null) {
+  if (!instance.getSource(EVAC_SOURCE_ID)) {
+    instance.addSource(EVAC_SOURCE_ID, {
+      type: 'geojson', data: evacuationData(sites),
+    });
+  }
+  const layout = { visibility: visible ? 'visible' as const : 'none' as const };
+  if (!instance.getLayer(EVAC_SITE_ID)) instance.addLayer({
+    id: EVAC_SITE_ID, type: 'circle', source: EVAC_SOURCE_ID,
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-color': '#075e70', 'circle-radius': 8,
+      'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2.5,
+    },
+  });
+  if (icon?.complete && icon.naturalWidth && !instance.getImage(EVAC_ICON_ID)) {
+    instance.addImage(EVAC_ICON_ID, icon, { pixelRatio: 3 });
+  }
+  if (instance.getImage(EVAC_ICON_ID) && !instance.getLayer(EVAC_ICON_LAYER_ID)) {
+    instance.addLayer({
+      id: EVAC_ICON_LAYER_ID, type: 'symbol', source: EVAC_SOURCE_ID,
+      layout: {
+        ...layout, 'icon-image': EVAC_ICON_ID, 'icon-anchor': 'bottom',
+        'icon-size': ['interpolate', ['linear'], ['zoom'],
+          8, 0.5, 12, 0.62, 14, 0.72, 16, 0.82, 18, 1],
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+      },
+    });
+  }
+  instance.setLayoutProperty(EVAC_SITE_ID, 'visibility',
+    instance.getLayer(EVAC_ICON_LAYER_ID) ? 'none' : layout.visibility);
+  if (instance.getLayer(EVAC_ICON_LAYER_ID))
+    instance.setLayoutProperty(EVAC_ICON_LAYER_ID, 'visibility', layout.visibility);
+
+  if (!instance.getSource(EVAC_FOOTPRINT_SOURCE_ID)) {
+    instance.addSource(EVAC_FOOTPRINT_SOURCE_ID, { type: 'geojson', data: emptyFootprint() });
+  }
+  const beforeId = instance.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
+  if (!instance.getLayer(EVAC_FOOTPRINT_FILL_ID)) instance.addLayer({
+    id: EVAC_FOOTPRINT_FILL_ID, type: 'fill', source: EVAC_FOOTPRINT_SOURCE_ID,
+    minzoom: 13,
+    paint: { 'fill-color': '#088b99', 'fill-opacity': 0.78,
+      'fill-outline-color': '#e2ffff' },
+  }, beforeId);
+  if (!instance.getLayer(EVAC_FOOTPRINT_3D_ID)) instance.addLayer({
+    id: EVAC_FOOTPRINT_3D_ID, type: 'fill-extrusion', source: EVAC_FOOTPRINT_SOURCE_ID,
+    minzoom: 14,
+    paint: { 'fill-extrusion-color': '#087b89', 'fill-extrusion-opacity': 0.92,
+      'fill-extrusion-height': ['to-number', ['get', 'height'], 0],
+      'fill-extrusion-base': ['to-number', ['get', 'base'], 0] },
+  }, beforeId);
+}
+
+
 export const MapCanvas = forwardRef<MapHandle, {
   onFlatViewChange: (flat: boolean) => void;
-}>(function MapCanvas({ onFlatViewChange }, ref) {
+  evacuationSites: MappedEvacuationSite[];
+  showEvacuationSites: boolean;
+}>(function MapCanvas({ onFlatViewChange, evacuationSites, showEvacuationSites }, ref) {
   const flow = useFlow();
   const latest = useRef(flow);
   latest.current = flow;
   const flatViewChange = useRef(onFlatViewChange);
   flatViewChange.current = onFlatViewChange;
+  const sitesRef = useRef(evacuationSites);
+  sitesRef.current = evacuationSites;
+  const sitesVisibleRef = useRef(showEvacuationSites);
+  sitesVisibleRef.current = showEvacuationSites;
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<LibreMap | null>(null);
   const library = useRef<typeof import('maplibre-gl') | null>(null);
   const markers = useRef(new Map<string, LibreMarker>());
   const userMarker = useRef<LibreMarker | null>(null);
+  const sitePopup = useRef<LibrePopup | null>(null);
+  const selectedEvacuationId = useRef<string | null>(null);
+  const selectedFootprintKey = useRef('');
+  const evacuationIcon = useRef<HTMLImageElement | null>(null);
   const [hosts, setHosts] = useState<MarkerHost[]>([]);
+  const [zoomTier, setZoomTier] = useState<'wide' | 'regional' | 'city'>('city');
+  const zoomTierRef = useRef<'wide' | 'regional' | 'city'>('city');
   const [engineVersion, setEngineVersion] = useState(0);
   const appliedStyle = useRef<{ basemap: Basemap; retry: number } | null>(null);
   const [mapIssue, setMapIssue] = useState('');
@@ -207,7 +297,7 @@ export const MapCanvas = forwardRef<MapHandle, {
     center: [number, number]; zoom: number; pitch: number; bearing: number;
   } | null>(null);
 
-  /** Offset the selected point into the portion not covered by the detail sheet. */
+
   const focus = useCallback((id: string) => {
     const instance = map.current;
     const el = container.current;
@@ -234,6 +324,93 @@ export const MapCanvas = forwardRef<MapHandle, {
       ],
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
     });
+  }, []);
+
+  const refreshSelectedFootprint = useCallback((instance: LibreMap) => {
+    const source = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!source || !instance.isStyleLoaded()) return;
+    const id = selectedEvacuationId.current;
+    const site = sitesRef.current.find(item => item.id === id);
+    const buildingLayers = instance.getStyle().layers.filter(layer =>
+      layer.type === 'fill' && 'source-layer' in layer &&
+      layer['source-layer'] === 'building').map(layer => layer.id);
+    const point = site && instance.project([site.longitude, site.latitude]);
+    const building = point && buildingLayers.length && instance.getZoom() >= 13
+      ? instance.queryRenderedFeatures(point, { layers: buildingLayers })
+        .find(feature => feature.geometry.type === 'Polygon' ||
+          feature.geometry.type === 'MultiPolygon')
+      : undefined;
+    const key = building && site
+      ? `${site.id}:${JSON.stringify(building.geometry)}` : '';
+    if (selectedFootprintKey.current === key) return;
+    selectedFootprintKey.current = key;
+    if (!building || !site) {
+      void source.setData(emptyFootprint());
+      return;
+    }
+    void source.setData({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature', geometry: building.geometry,
+        properties: {
+          height: Number(building.properties?.render_height) || 0,
+          base: Number(building.properties?.render_min_height) || 0,
+        },
+      }],
+    });
+  }, []);
+
+  const focusEvacuation = useCallback((id: string) => {
+    const instance = map.current;
+    const lib = library.current;
+    const site = sitesRef.current.find(item => item.id === id);
+    if (!instance || !lib || !site) return;
+    for (const layer of [EVAC_SITE_ID, EVAC_ICON_LAYER_ID]) {
+      if (instance.getLayer(layer)) instance.setLayoutProperty(layer, 'visibility', 'visible');
+    }
+    latest.current.closeDetails();
+    sitePopup.current?.remove();
+    selectedEvacuationId.current = id;
+    selectedFootprintKey.current = '';
+    const footprint = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
+    if (footprint) void footprint.setData(emptyFootprint());
+
+    const content = document.createElement('div');
+    content.className = 'evacuation-popup';
+    const heading = document.createElement('strong');
+    heading.textContent = site.name;
+    const icon = document.createElement('span');
+    icon.className = 'evacuation-popup-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-7 9 7M5.5 9.5V20h13V9.5M10 20v-7h4v7"/></svg>';
+    const location = document.createElement('span');
+    location.textContent = site.city;
+    const note = document.createElement('p');
+    note.textContent = 'Recorded site. Confirm with your LGU that it is open and safe before traveling.';
+    const links = document.createElement('div');
+    links.className = 'evacuation-popup-links';
+    const directions = document.createElement('a');
+    directions.href = `https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}`;
+    directions.target = '_blank';
+    directions.rel = 'noopener noreferrer';
+    directions.textContent = 'Directions';
+    links.append(directions);
+    content.append(icon, heading, location, note, links);
+
+    sitePopup.current = new lib.Popup({ offset: 16, maxWidth: '290px',
+      className: 'flow-evacuation-popup' })
+      .setLngLat([site.longitude, site.latitude]).setDOMContent(content).addTo(instance);
+    sitePopup.current.on('close', () => {
+      if (selectedEvacuationId.current !== id) return;
+      selectedEvacuationId.current = null;
+      selectedFootprintKey.current = '';
+      const currentSource = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
+      if (currentSource) void currentSource.setData(emptyFootprint());
+    });
+    instance.easeTo({ center: [site.longitude, site.latitude],
+      zoom: Math.max(15, instance.getZoom()),
+      pitch: CITY_PITCH, bearing: CITY_BEARING,
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
   }, []);
 
   const rememberTiltedView = useCallback((instance: LibreMap) => {
@@ -302,6 +479,7 @@ export const MapCanvas = forwardRef<MapHandle, {
 
   useImperativeHandle(ref, () => ({
     focus,
+    focusEvacuation,
     fit,
     showPhilippines,
     restoreTilt() {
@@ -340,7 +518,7 @@ export const MapCanvas = forwardRef<MapHandle, {
         pitch: CITY_PITCH, bearing: CITY_BEARING, duration: 320 });
       return true;
     },
-  }), [finishViewTransitionIfIdle, focus, fit, showPhilippines]);
+  }), [finishViewTransitionIfIdle, focus, focusEvacuation, fit, showPhilippines]);
 
   useEffect(() => {
     if (!flow.ready) return;
@@ -356,13 +534,21 @@ export const MapCanvas = forwardRef<MapHandle, {
 
     async function initialize() {
       try {
-        // Download the map engine and the provider style at the same time.
+
         const [lib, style] = await Promise.all([
           import('maplibre-gl'),
           loadBasemap(initialMode, controller.signal),
         ]);
         if (cancelled || !container.current) return;
         library.current = lib;
+        const siteIcon = new Image(96, 120);
+        evacuationIcon.current = siteIcon;
+        siteIcon.onload = () => {
+          if (!cancelled && instance && map.current === instance &&
+            instance.getSource(EVAC_SOURCE_ID))
+            addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current, siteIcon);
+        };
+        siteIcon.src = '/assets/evacuation-marker.svg';
         instance = new lib.Map({
           container: container.current,
           center: METRO_MANILA_CENTER,
@@ -392,8 +578,29 @@ export const MapCanvas = forwardRef<MapHandle, {
         flatViewChange.current(instance.getPitch() <= 1);
         appliedStyle.current = { basemap: initialMode, retry };
         instance.on('style.load', () => {
-          if (instance) addHeatLayers(instance, latest.current);
+          if (instance) {
+            selectedFootprintKey.current = '';
+            addHeatLayers(instance, latest.current);
+            addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
+              evacuationIcon.current);
+          }
         });
+        instance.on('click', EVAC_SITE_ID, event => {
+          const id = event.features?.[0]?.properties?.id;
+          if (typeof id === 'string') focusEvacuation(id);
+        });
+        instance.on('click', EVAC_ICON_LAYER_ID, event => {
+          const id = event.features?.[0]?.properties?.id;
+          if (typeof id === 'string') focusEvacuation(id);
+        });
+        for (const layer of [EVAC_SITE_ID, EVAC_ICON_LAYER_ID]) {
+          instance.on('mouseenter', layer, () => {
+            if (instance) instance.getCanvas().style.cursor = 'pointer';
+          });
+          instance.on('mouseleave', layer, () => {
+            if (instance) instance.getCanvas().style.cursor = '';
+          });
+        }
         instance.on('moveend', (event) => {
           if (cancelled || !instance) return;
           if (viewTransitioning.current !== null) {
@@ -401,7 +608,23 @@ export const MapCanvas = forwardRef<MapHandle, {
             viewTransitioning.current = null;
           }
           flatViewChange.current(instance.getPitch() <= 1);
+          if (selectedEvacuationId.current) refreshSelectedFootprint(instance);
         });
+        instance.on('idle', () => {
+          if (!cancelled && instance && selectedEvacuationId.current)
+            refreshSelectedFootprint(instance);
+        });
+        const updateZoomTier = () => {
+          if (!instance) return;
+          const zoom = instance.getZoom();
+          const tier = zoom < 11 ? 'wide' : zoom < 14.5 ? 'regional' : 'city';
+          if (tier !== zoomTierRef.current) {
+            zoomTierRef.current = tier;
+            setZoomTier(tier);
+          }
+        };
+        instance.on('zoom', updateZoomTier);
+        updateZoomTier();
         instance.on('error', () => {
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
         });
@@ -409,8 +632,8 @@ export const MapCanvas = forwardRef<MapHandle, {
         const updateCountryZoomLimit = () => {
           if (!instance) return;
           instance.resize();
-          // Recalculate for the viewport so the country is the farthest zoom-out
-          // on both narrow phones and wide desktop screens.
+
+
           const countryView = instance.cameraForBounds(PHILIPPINES_BOUNDS, { padding: 32 });
           if (countryView) instance.setMinZoom(countryView.zoom);
         };
@@ -434,6 +657,11 @@ export const MapCanvas = forwardRef<MapHandle, {
       for (const marker of markers.current.values()) marker.remove();
       markers.current.clear();
       userMarker.current?.remove();
+      sitePopup.current?.remove();
+      if (evacuationIcon.current) evacuationIcon.current.onload = null;
+      evacuationIcon.current = null;
+      selectedEvacuationId.current = null;
+      selectedFootprintKey.current = '';
       instance?.remove();
       map.current = null;
       appliedStyle.current = null;
@@ -441,9 +669,9 @@ export const MapCanvas = forwardRef<MapHandle, {
       previousTilt.current = null;
       viewTransitioning.current = null;
     };
-  }, [flow.ready, retry]);
+  }, [flow.ready, retry, focusEvacuation, refreshSelectedFootprint]);
 
-  // Once the first sensor arrives, keep the close opening view on that sensor.
+
   useEffect(() => {
     const instance = map.current;
     if (!engineVersion || !instance || initialNodeCentered.current || !flow.nodes.length) return;
@@ -476,14 +704,16 @@ export const MapCanvas = forwardRef<MapHandle, {
     void loadBasemap(flow.basemap, controller.signal)
       .then((style) => {
         if (!cancelled) {
-          // Keep the shared vector source and its already loaded tiles when possible.
+
           instance.setStyle(style, { diff: true });
           appliedStyle.current = { basemap: flow.basemap, retry };
-          // Diffed styles do not emit style.load. Apply FLOW layers now when
-          // the new style is ready; a full rebuild still uses the listener.
+
+
           const currentStyle = instance.getStyle();
           if (currentStyle?.name === style.name && currentStyle.layers?.length) {
             addHeatLayers(instance, latest.current);
+            addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
+              evacuationIcon.current);
           }
         }
       })
@@ -507,6 +737,22 @@ export const MapCanvas = forwardRef<MapHandle, {
     const source = instance.getSource(HEAT_SOURCE_ID) as GeoJSONSource | undefined;
     if (source) void source.setData(heatData(flow));
   }, [engineVersion, flow.visibleNodes, flow.getStatus]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!engineVersion || !instance) return;
+    const source = instance.getSource(EVAC_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!source) return;
+    void source.setData(evacuationData(evacuationSites));
+    for (const id of [EVAC_ICON_LAYER_ID]) {
+      if (instance.getLayer(id)) instance.setLayoutProperty(id, 'visibility',
+        showEvacuationSites ? 'visible' : 'none');
+    }
+    if (instance.getLayer(EVAC_SITE_ID)) instance.setLayoutProperty(EVAC_SITE_ID,
+      'visibility', instance.getLayer(EVAC_ICON_LAYER_ID) ? 'none'
+        : showEvacuationSites ? 'visible' : 'none');
+    if (!showEvacuationSites) sitePopup.current?.remove();
+  }, [engineVersion, evacuationSites, showEvacuationSites]);
 
   useEffect(() => {
     const instance = map.current;
@@ -547,7 +793,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       lastFocused.current = null;
       return;
     }
-    // Do not reset the camera on every heartbeat or freshness tick.
+
     const key = `${flow.selectedId}:${flow.expanded}`;
     if (lastFocused.current === key) return;
     lastFocused.current = key;
@@ -575,6 +821,7 @@ export const MapCanvas = forwardRef<MapHandle, {
             style={{ '--status-color': status.color } as CSSProperties}
             data-level={status.level ?? 'unavailable'}
             data-unavailable={status.level === null}
+            data-zoom-tier={zoomTier}
             aria-label={`${node.name}: ${status.label} at this sensor. Open details.`}
             aria-pressed={flow.selectedId === id}
             title={`${status.label} at this sensor. Shading does not show flood extent.`}
@@ -585,7 +832,7 @@ export const MapCanvas = forwardRef<MapHandle, {
             }}
           >
             <span className="marker-label">{node.name}</span>
-            <span className="pin-ring" />
+            <span className="pin-ring"><Icon name="sensor" /></span>
           </button>,
           element,
           id,

@@ -2,7 +2,7 @@ import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
-/** Shared Node.js-only API helpers. Never import from a client component. */
+
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message);
@@ -24,7 +24,7 @@ export function getServerDb(): SupabaseClient {
       'Backend not configured. Set the Supabase URL and private SUPABASE_SECRET_KEY on the server.'
     );
 
-  // Lazy initialization: a build/empty-map page never needs real credentials.
+
   client = createClient(url, key, {
     auth: {
       persistSession: false,
@@ -58,7 +58,7 @@ export function failure(error: unknown): Response {
   if (error instanceof ApiError)
     return json({ error: error.message }, error.status);
 
-  // Do not return raw SQL/auth/provider errors or secrets to a public caller.
+
   console.error('FLOW API operation failed', error instanceof Error ? error.name : 'BackendError');
   return json(
     {
@@ -70,7 +70,7 @@ export function failure(error: unknown): Response {
 
 export function checkOrigin(req: Request): void {
   const origin = req.headers.get('origin');
-  // Hardware and authenticated server callers have no browser Origin header.
+
   if (!origin)
     return;
 
@@ -79,7 +79,7 @@ export function checkOrigin(req: Request): void {
     throw new ApiError(403, 'Origin not allowed');
 }
 
-/** Sensor registration is a private operational action, not a browser account role. */
+
 export function requireInstallerSecret(req: Request): void {
   const expected = process.env.FLOW_INSTALLER_SECRET?.trim() || '';
   if (expected.length < 32)
@@ -90,7 +90,7 @@ export function requireInstallerSecret(req: Request): void {
     throw new ApiError(401, 'Unauthorized');
 }
 
-/** Cap actual bytes, not only the client-supplied Content-Length header. */
+
 export async function readJson(req: Request, max = 8192): Promise<Record<string, unknown>> {
   if (req.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
     throw new ApiError(415, 'Content-Type must be application/json');

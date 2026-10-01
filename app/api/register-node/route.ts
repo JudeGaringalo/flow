@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     requireInstallerSecret(req);
     const body = nodeBody(await readJson(req));
     const token = body.action === 'update' ? null : newDeviceToken();
-    // One transaction: node registration and credential creation cannot split.
+
     const { data, error } = await getServerDb()
       .rpc('flow_write_node', {
         p_action: body.action,

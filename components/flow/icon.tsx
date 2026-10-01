@@ -1,7 +1,16 @@
 import type { SVGProps } from 'react';
 
-// Lucide-derived paths retained from the supplied UI. See THIRD_PARTY.md (ISC).
+
 const paths = {
+  'sensor': <>
+    <path d="M5 15.5c1.6-1.3 3.4-1.3 5 0s3.4 1.3 5 0 3.4-1.3 5 0" />
+    <path d="M5 19c1.6-1.3 3.4-1.3 5 0s3.4 1.3 5 0 3.4-1.3 5 0" />
+    <path d="M12.5 4v7m-2.5-4.5 2.5-2.5L15 6.5" />
+  </>,
+  'shelter': <>
+    <path d="m3 11 9-7 9 7M5.5 9.5V20h13V9.5" />
+    <path d="M10 20v-7h4v7" />
+  </>,
   'flood': (
     <>
       <path d="m4 10 8-7 8 7M7 9v6h10V9M10 15v-4h4v4" />
@@ -133,7 +142,7 @@ const paths = {
     <path d="M3 8v8l9 5 9-5V8M12 13v8" />
   </>,
   'layers': <>
-    <path 
+    <path
       d="m12 3 10 5-10 5L2 8Z"
       fill="currentColor"
       stroke="currentColor"

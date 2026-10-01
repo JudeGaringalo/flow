@@ -1,4 +1,4 @@
-// Route tests with an isolated Supabase mock. Run live SQL/hardware checks separately.
+
 import ts from 'typescript';
 import vm from 'node:vm';
 import fs from 'node:fs';
@@ -17,7 +17,7 @@ let count = 0;
 async function test(name, run) { await run(); console.log('PASS', name); count++; }
 
 function harness({ env = {}, results = [] } = {}) {
-  const calls = [], cache = new Map(), queue = [...results];
+  const calls = [], scheduled = [], cache = new Map(), queue = [...results];
   const db = {
     rpc: (name, args) => {
       calls.push({ name, args });
@@ -44,6 +44,7 @@ function harness({ env = {}, results = [] } = {}) {
     }).outputText;
     const require = name => {
       if (name === 'server-only') return {};
+      if (name === 'next/server') return { after: task => scheduled.push(task) };
       if (name === 'node:crypto') return crypto;
       if (name === '@supabase/supabase-js') return { createClient: () => db };
       if (name.startsWith('@/')) return load(path.resolve(name.slice(2)));
@@ -62,7 +63,7 @@ function harness({ env = {}, results = [] } = {}) {
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body)
   });
-  return { load, request, calls };
+  return { load, request, calls, scheduled };
 }
 const result = (name, data, error = null) => ({ name, result: { data, error } });
 
@@ -110,6 +111,7 @@ await test('A valid device report verifies its hash inside the one-table transac
   assert.equal(h.calls[0].args.p_token_hash,
     crypto.createHash('sha256').update(deviceToken).digest('hex'));
   assert.equal(h.calls[0].args.p_probes[1], true);
+  assert.equal(h.scheduled.length, 1);
 });
 
 await test('A database-denied device is returned as unauthorized', async () => {
@@ -125,6 +127,29 @@ await test('Inconsistent probes are passed through for sensor fault classificati
     { ...reading, probes: [false, true, false] }, { 'x-device-token': deviceToken }));
   assert.equal(res.status, 200);
   assert.equal(h.calls[0].args.p_probes[0], false);
+});
+
+await test('Push registration checks origin and saves a rounded location', async () => {
+  const subscription = {
+    endpoint: 'https://fcm.googleapis.com/fcm/send/test-subscription',
+    keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) }
+  };
+  const blocked = harness();
+  const route = blocked.load('app/api/alerts/subscription/route.ts');
+  const wrongOrigin = await route.POST(blocked.request('alerts/subscription',
+    { subscription, latitude: 14.601234, longitude: 121.005678 },
+    { origin: 'https://another.example' }));
+  assert.equal(wrongOrigin.status, 403);
+  assert.equal(blocked.calls.length, 0);
+
+  const allowed = harness({ results: [result('flow_store_push_subscription', true)] });
+  const saved = await allowed.load('app/api/alerts/subscription/route.ts').POST(
+    allowed.request('alerts/subscription', {
+      subscription, latitude: 14.601234, longitude: 121.005678
+    }, { origin: 'http://localhost' }));
+  assert.equal(saved.status, 200);
+  assert.equal(allowed.calls[0].args.p_latitude, 14.601);
+  assert.equal(allowed.calls[0].args.p_longitude, 121.006);
 });
 
 console.log(`\n${count} one-table API checks passed. Live Supabase was not contacted.`);
