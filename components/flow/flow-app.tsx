@@ -130,25 +130,52 @@ function Workspace() {
   if (!f.alertLocation) return <>
     <PwaRegistration />
     <main className="location-gate-page">
-      <section className="location-gate" role="dialog" aria-modal="true"
-        aria-labelledby="location-gate-title" aria-describedby="location-gate-description">
-        <Image src="/assets/flow-wordmark.svg" alt="FLOW" width={145} height={36} priority />
-        <div className="location-gate-icon" aria-hidden="true"><Icon name="locate" /></div>
-        <h1 id="location-gate-title">Enable your location</h1>
-        <p id="location-gate-description">
-          FLOW uses your location to check which monitoring points are within 3 km and alert you
-          when their water level rises. If you allow notifications, FLOW saves an approximate
-          area for alerts while the app is closed.
-        </p>
-        <button className="primary-btn" type="button" disabled={f.locationWorking}
-          onClick={() => void f.requestAlertLocation()}>
-          {f.locationWorking ? 'Checking location…' : 'Enable location and alerts'}
-        </button>
-        {f.locationError && <p className="location-gate-error" role="alert">{f.locationError}</p>}
-        <small>Allow location access when prompted. Browser notifications also need permission;
-          FLOW will show alerts on screen when system notifications are unavailable.</small>
-      </section>
-    </main>
+  <section
+    className="location-gate"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="location-gate-title"
+    aria-describedby="location-gate-description"
+  >
+    <div className="location-gate-heading">
+      <Image
+        src="/assets/flow-wordmark.svg"
+        alt="FLOW"
+        width={145}
+        height={36}
+        priority
+      />
+      <h1 id="location-gate-title">Enable your location</h1>
+    </div>
+
+    <p id="location-gate-description">
+      FLOW uses your location to check which monitoring points are within 3 km
+      and alert you when their water level rises. If you allow notifications,
+      FLOW saves an approximate area for alerts while the app is closed.
+    </p>
+
+    <button
+      className="primary-btn"
+      type="button"
+      disabled={f.locationWorking}
+      onClick={() => void f.requestAlertLocation()}
+    >
+      {f.locationWorking ? "Checking location…" : "Enable location and alerts"}
+    </button>
+
+    {f.locationError && (
+      <p className="location-gate-error" role="alert">
+        {f.locationError}
+      </p>
+    )}
+
+    <small>
+      Allow location access when prompted. Browser notifications also need
+      permission; FLOW will show alerts on screen when system notifications are
+      unavailable.
+    </small>
+  </section>
+</main>
   </>;
 
   return (

@@ -2050,6 +2050,7 @@ body.light .evacuation-map-key:hover {
   background: #075e70;
   color: #fff !important;
 }
+
 .evacuation-popup-icon svg { width: 17px; height: 17px; }
 .evacuation-popup p, .evacuation-popup-links { grid-column: 1 / -1; }
 
@@ -2083,4 +2084,12 @@ body.light .evacuation-map-key:hover {
 .map-node .pin-ring .icon {
   width: var(--flow-pin-icon-size);
   height: var(--flow-pin-icon-size);
+}
+.location-gate-heading {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
 }
