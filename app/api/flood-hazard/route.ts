@@ -13,6 +13,10 @@ interface HazardFeature {
   properties: { Var: number };
 }
 
+class HazardSourceError extends Error {
+  constructor(readonly reason: string) { super(reason); }
+}
+
 function boundedBox(raw: string | null) {
   if (!raw) return null;
   const numbers = raw.split(',').map(Number);
@@ -29,14 +33,22 @@ function boundedBox(raw: string | null) {
 }
 
 async function query(params: URLSearchParams) {
-  const response = await fetch(`${SOURCE}?${params}`, {
-    signal: AbortSignal.timeout(8500),
-    next: { revalidate: 21600 },
-  });
-  if (!response.ok) throw new Error('Hazard source unavailable');
-  const result: unknown = await response.json();
+  let response: Response;
+  try {
+    response = await fetch(`${SOURCE}?${params}`, {
+      signal: AbortSignal.timeout(8500),
+      next: { revalidate: 21600 },
+    });
+  } catch (error) {
+    throw new HazardSourceError(error instanceof Error &&
+      (error.name === 'TimeoutError' || error.name === 'AbortError') ? 'timeout' : 'network');
+  }
+  if (!response.ok) throw new HazardSourceError(`upstream_http_${response.status}`);
+  let result: unknown;
+  try { result = await response.json(); }
+  catch { throw new HazardSourceError('invalid_json'); }
   if (!result || typeof result !== 'object' || 'error' in result)
-    throw new Error('Invalid hazard source response');
+    throw new HazardSourceError('upstream_error');
   return result;
 }
 
@@ -51,12 +63,13 @@ export async function GET(request: Request) {
     spatialRel: 'esriSpatialRelIntersects', f: 'json',
   });
 
+  let stage = 'count';
   try {
     params.set('returnCountOnly', 'true');
     const countResult = await query(params) as { count?: unknown };
     const count = countResult.count;
     if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
-      throw new Error('Invalid hazard feature count');
+      throw new HazardSourceError('invalid_count');
     if (count > MAX_FEATURES) return Response.json(
       { error: 'Zoom in to view the detailed hazard map.' },
       { status: 422, headers: { 'Cache-Control': 'public, s-maxage=300' } },
@@ -66,6 +79,7 @@ export async function GET(request: Request) {
       { headers: { 'Cache-Control': 'public, s-maxage=3600' } },
     );
 
+    stage = 'features';
     params.delete('returnCountOnly');
     params.set('outFields', 'Var');
     params.set('returnGeometry', 'true');
@@ -76,7 +90,7 @@ export async function GET(request: Request) {
     const data = await query(params) as Partial<FeatureCollection> & { exceededTransferLimit?: boolean };
     if (data.type !== 'FeatureCollection' || !Array.isArray(data.features) ||
         data.exceededTransferLimit || data.features.length !== count)
-      throw new Error('Incomplete hazard map');
+      throw new HazardSourceError('incomplete_features');
 
     const features: HazardFeature[] = data.features.flatMap(feature => {
       if (!feature || feature.type !== 'Feature' ||
@@ -98,8 +112,10 @@ export async function GET(request: Request) {
       'Content-Type': 'application/json',
       'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
     } });
-  } catch {
-    return Response.json({ error: 'Flood-hazard map unavailable. Try again later.' },
+  } catch (error) {
+    const reason = error instanceof HazardSourceError ? error.reason : 'processing_error';
+    console.error('Flood hazard request failed', { stage, reason });
+    return Response.json({ error: 'Flood-hazard map unavailable. Try again later.', stage, reason },
       { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
 }
