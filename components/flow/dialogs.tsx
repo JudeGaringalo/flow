@@ -5,13 +5,13 @@ import { useFlow } from '@/hooks/use-flow';
 import { BASEMAPS } from '@/lib/map-styles';
 import { STATUS } from '@/lib/core';
 import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
-import type { HazardState } from './map-canvas';
+import type { HazardScenario, HazardState } from './map-canvas';
 import { Icon } from './icon';
 import { AlertSettings } from './alert-settings';
 import type { MapHandle, ModalKind, StatusKey } from '@/lib/types';
 
 const TITLES: Record<ModalKind, string> = {
-  menu: 'FLOW', layers: 'Map layers', about: 'About observations',
+  menu: 'FLOW', layers: 'Map layers & Settings', about: 'About observations',
   install: 'Install FLOW', directions: 'Open directions', alerts: 'Nearby alerts',
   evacuation: 'Mapped evacuation sites',
 };
@@ -23,6 +23,8 @@ interface DialogProps {
   setShowEvacuationSites: (visible: boolean) => void;
   showHazard: boolean;
   setShowHazard: (visible: boolean) => void;
+  hazardScenario: HazardScenario;
+  setHazardScenario: (scenario: HazardScenario) => void;
   hazardState: HazardState;
   siteState: 'loading' | 'ready' | 'error';
   onRetrySites: () => void;
@@ -62,7 +64,8 @@ export function Dialogs(props: DialogProps) {
 }
 
 function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
-  setShowEvacuationSites, showHazard, setShowHazard, hazardState,
+  setShowEvacuationSites, showHazard, setShowHazard,
+  hazardScenario, setHazardScenario, hazardState,
   siteState, onRetrySites, onSelectEvacuation }:
   DialogProps & { kind: ModalKind }) {
   const f = useFlow();
@@ -83,7 +86,16 @@ function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
         ))}
       </div>
       <h3>Flood hazard</h3>
-      <p>Mapped flood-hazard areas for a 5-year rainfall scenario. This is not live flooding.</p>
+      <p>Modeled flood areas for the selected rainfall scenario. This is not live flooding.</p>
+      <div className="segmented" role="group" aria-label="Flood rainfall scenario">
+        {(['5yr', '100yr'] as const).map(scenario => (
+          <button key={scenario} type="button" className={hazardScenario === scenario ? 'active' : ''}
+            aria-pressed={hazardScenario === scenario}
+            onClick={() => setHazardScenario(scenario)}>
+            {scenario === '100yr' ? '100-year' : '5-year'}
+          </button>
+        ))}
+      </div>
       <button className="hazard-layer-toggle" type="button" aria-pressed={showHazard}
         onClick={() => setShowHazard(!showHazard)}>
         <span className="hazard-toggle-colors" aria-hidden="true"><i /><i /><i /></span>
@@ -92,7 +104,7 @@ function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
         <span className="hazard-toggle-state">{showHazard ? 'On' : 'Off'}</span>
       </button>
       {showHazard && hazardState === 'unavailable' &&
-        <p role="status">The hazard source is unavailable. Try moving the map or reopen this layer.</p>}
+        <p role="status">The hazard source is unavailable. Try again later.</p>}
       <p className="hazard-source">Map data: © NOAH (
         <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank"
           rel="noopener noreferrer">ODbL</a>). Coverage and detail vary by area.
@@ -186,9 +198,6 @@ function Menu() {
   const installed = useInstalledApp();
   return (
     <div className="menu-list">
-      <button type="button" onClick={() => f.setModal('alerts')}>
-        <Icon name="bell" />Nearby alerts<Icon name="chevron" />
-      </button>
       {!installed && <button type="button" onClick={() => f.setModal('install')}>
         <Icon name="download" />Install FLOW<Icon name="chevron" />
       </button>}

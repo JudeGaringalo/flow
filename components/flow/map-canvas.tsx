@@ -10,13 +10,16 @@ import {
   type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
-import type { ExpressionSpecification, GeoJSONSource, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup } from 'maplibre-gl';
+import type { ExpressionSpecification, FilterSpecification, GeoJSONSource, GeoJSONSourceSpecification, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup, StyleSpecification, VectorSourceSpecification } from 'maplibre-gl';
 
 import { Icon } from './icon';
 import { useFlow } from '@/hooks/use-flow';
 import { loadBasemap } from '@/lib/map-styles';
 import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
+import hazardBundle from '@/lib/hazard-bundle.json';
+import hazardOverview from '@/lib/hazard-overview.json';
+import hazard100 from '@/lib/hazard-100.json';
+import neighboringCountries from '@/lib/neighboring-countries.json';
 import type { Basemap, MapHandle } from '@/lib/types';
 
 interface MarkerHost {
@@ -29,6 +32,12 @@ const PHILIPPINES_BOUNDS: [[number, number], [number, number]] = [
   [112, 4],
   [128, 22],
 ];
+const PHILIPPINES_OVERVIEW_BOUNDS: [[number, number], [number, number]] = [
+  [115.8, 4.4],
+  [127.2, 21.4],
+];
+
+const overviewPadding = (width: number) => width < 600 ? 10 : 32;
 
 const METRO_MANILA_CENTER: [number, number] = [121.03, 14.595];
 
@@ -38,9 +47,50 @@ const MAP_LIMITS: [[number, number], [number, number]] = [
   [142, 31],
 ];
 
+const [[countryWest, countrySouth], [countryEast, countryNorth]] = PHILIPPINES_BOUNDS;
+const outsideCountry = [
+  [-180, -85, countryWest, 85],
+  [countryEast, -85, 180, 85],
+  [countryWest, -85, countryEast, countrySouth],
+  [countryWest, countryNorth, countryEast, 85],
+].map(([west, south, east, north]) => ({
+  type: 'Feature' as const,
+  properties: {},
+  geometry: {
+    type: 'Polygon' as const,
+    coordinates: [[[west, south], [east, south], [east, north],
+      [west, north], [west, south]]],
+  },
+}));
+const COUNTRY_MASK_DATA = {
+  type: 'FeatureCollection',
+  features: [...neighboringCountries.features, ...outsideCountry, {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [111.5, 3.8], [118.9, 3.8], [118.9, 6.9],
+        [117, 7.4], [116.6, 8], [111.5, 8], [111.5, 3.8],
+      ]],
+    },
+  }],
+} as GeoJSONSourceSpecification['data'];
+const PHILIPPINE_PLACE_AREA = {
+  type: 'Polygon' as const,
+  coordinates: [[
+    [111.5, 8], [116.6, 8], [117, 7.4], [118.9, 6.9],
+    [118.9, 3.8], [128.5, 3.8], [128.5, 22.5],
+    [111.5, 22.5], [111.5, 8],
+  ]],
+};
+
 const HEAT_SOURCE_ID = 'flow-sensor-heat';
 const HAZARD_SOURCE_ID = 'flow-noah-hazard';
 const HAZARD_LAYER_ID = 'flow-noah-hazard-fill';
+const HAZARD_BUILDING_MASK_ID = 'flow-noah-building-mask';
+const NEIGHBORS_SOURCE_ID = 'flow-neighboring-countries';
+const NEIGHBORS_MASK_ID = 'flow-neighboring-countries-mask';
 const EVAC_SOURCE_ID = 'flow-evacuation-sites';
 const EVAC_SITE_ID = 'flow-evacuation-points';
 const EVAC_ICON_ID = 'flow-evacuation-icon';
@@ -49,83 +99,234 @@ const EVAC_FOOTPRINT_SOURCE_ID = 'flow-evacuation-footprint';
 const EVAC_FOOTPRINT_FILL_ID = 'flow-evacuation-footprint-fill';
 const EVAC_FOOTPRINT_3D_ID = 'flow-evacuation-footprint-3d';
 const BUILDINGS_3D_ID = 'flow-buildings-3d';
+const BUILDINGS_3D_MIN_ZOOM = 12;
 const CITY_PITCH = 60;
 const CITY_BEARING = -17;
 const FOCUS_ZOOM = 17;
-const HAZARD_BOUNDS = [120.85, 14.32, 121.30, 14.86] as const;
-const NOAH_QUERY = 'https://services1.arcgis.com/IwZZTMxZCmAmFYvF/ArcGIS/rest/services/Flood_Control_5_Year/FeatureServer/0/query';
+const WIDE_VIEW_ZOOM = 11.5;
+const FULL_TILT_ZOOM = 13.5;
+type CameraView = {
+  center: [number, number]; zoom: number; pitch: number; bearing: number;
+};
+
+function cameraView(instance: LibreMap): CameraView {
+  const center = instance.getCenter();
+  return {
+    center: [center.lng, center.lat],
+    zoom: instance.getZoom(),
+    pitch: instance.getPitch(),
+    bearing: instance.getBearing(),
+  };
+}
+
+function returnViewAt(instance: LibreMap, center: [number, number]): CameraView {
+  const view = cameraView(instance);
+  return {
+    ...view,
+    center,
+    zoom: Math.min(FULL_TILT_ZOOM, Math.max(WIDE_VIEW_ZOOM, view.zoom)),
+  };
+}
+
+export type HazardScenario = '5yr' | '100yr';
+const HAZARD_ARCHIVES: Record<HazardScenario, string> = {
+  '5yr': process.env.NEXT_PUBLIC_NOAH_5YR_PMTILES_URL?.trim()
+    || 'https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/layers/flood_5yr.pmtiles',
+  '100yr': process.env.NEXT_PUBLIC_NOAH_100YR_PMTILES_URL?.trim()
+    || 'https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/layers/flood_100yr.pmtiles',
+};
+const LOCAL_HAZARD = hazardBundle.ready;
+const LOCAL_OVERVIEW = hazardOverview.ready;
+const LOCAL_100 = hazard100.ready;
+let hazardProtocolRegistered = false;
+const hazardArchives: Partial<Record<HazardScenario, import('pmtiles').PMTiles>> = {};
+let hazardProtocolPromise: Promise<void> | null = null;
 
 export type HazardState = 'off' | 'loading' | 'ready' | 'empty' | 'zoom' | 'unavailable';
 
-function emptyHazard(): FeatureCollection<Polygon | MultiPolygon> {
-  return { type: 'FeatureCollection', features: [] };
+function tileIntersectsBounds(z: number, x: number, y: number,
+  bounds: readonly number[]) {
+  const [west, south, east, north] = bounds;
+  const count = 2 ** z;
+  const xAt = (longitude: number) => Math.max(0, Math.min(count - 1,
+    Math.floor((longitude + 180) / 360 * count)));
+  const yAt = (latitude: number) => Math.max(0, Math.min(count - 1,
+    Math.floor((1 - Math.asinh(Math.tan(latitude * Math.PI / 180)) / Math.PI) / 2 * count)));
+  return x >= xAt(west) && x <= xAt(east) &&
+    y >= yAt(north) && y <= yAt(south);
 }
 
-async function fetchNoahDirectly(box: string, signal: AbortSignal) {
-  const params = new URLSearchParams({
-    where: '1=1', geometry: box,
-    geometryType: 'esriGeometryEnvelope', spatialRel: 'esriSpatialRelIntersects',
-    inSR: '4326', outSR: '4326', returnCountOnly: 'true', f: 'json',
+function tileInLocalBundle(z: number, x: number, y: number) {
+  return LOCAL_HAZARD && z >= hazardBundle.minzoom && z <= hazardBundle.maxzoom &&
+    tileIntersectsBounds(z, x, y, hazardBundle.bounds);
+}
+
+function tileInLocal100(z: number, x: number, y: number) {
+  return LOCAL_100 && z <= hazard100.maxzoom &&
+    tileIntersectsBounds(z, x, y,
+      z <= hazard100.overviewMaxzoom ? hazard100.overviewBounds : hazard100.detailBounds);
+}
+
+function prepareHazardProtocol(lib: typeof import('maplibre-gl')) {
+  if (!hazardProtocolPromise) {
+    hazardProtocolPromise = import('pmtiles').then(pmtiles => {
+      if (!hazardProtocolRegistered) {
+        lib.addProtocol('flowhazard', async (params, abortController) => {
+          const match = /^flowhazard:\/\/noah\/(5yr|100yr)\/(\d+)\/(\d+)\/(\d+)\.pbf$/.exec(params.url);
+          if (!match) throw new Error('Invalid FLOW hazard tile URL');
+          const scenario = match[1] as HazardScenario;
+          const [z, x, y] = match.slice(2).map(Number);
+          if (scenario === '100yr' && tileInLocal100(z, x, y)) {
+            const local = await fetch(
+              `/hazard/${hazard100.version}/${z}/${x}/${y}.pbf.gz`,
+              { signal: abortController.signal },
+            );
+            if (local.ok) return { data: new Uint8Array(await local.arrayBuffer()) };
+          }
+          if (scenario === '5yr' && LOCAL_OVERVIEW && z <= hazardOverview.maxzoom &&
+              tileIntersectsBounds(z, x, y, hazardOverview.bounds)) {
+            const overview = await fetch(
+              `/hazard/${hazardOverview.version}/${z}/${x}/${y}.pbf.gz`,
+              { signal: abortController.signal },
+            );
+            if (overview.ok) return { data: new Uint8Array(await overview.arrayBuffer()) };
+          }
+          if (scenario === '5yr' && tileInLocalBundle(z, x, y)) {
+            const local = await fetch(
+              `/hazard/${hazardBundle.version}/${z}/${x}/${y}.pbf`,
+              { signal: abortController.signal },
+            );
+            if (local.ok) return { data: new Uint8Array(await local.arrayBuffer()) };
+          }
+          const archive = hazardArchives[scenario] ??
+            (hazardArchives[scenario] = new pmtiles.PMTiles(HAZARD_ARCHIVES[scenario]));
+          const tile = await archive.getZxy(z, x, y, abortController.signal);
+          abortController.signal.throwIfAborted();
+          return { data: tile ? new Uint8Array(tile.data) : new Uint8Array() };
+        });
+        hazardProtocolRegistered = true;
+      }
+    }).catch(error => {
+      hazardProtocolPromise = null;
+      throw error;
+    });
+  }
+  return hazardProtocolPromise;
+}
+
+function addNeighborMask(instance: LibreMap, satellite: boolean) {
+  if (!instance.getSource(NEIGHBORS_SOURCE_ID)) {
+    instance.addSource(NEIGHBORS_SOURCE_ID, {
+      type: 'geojson', data: COUNTRY_MASK_DATA,
+    });
+  }
+  if (!instance.getLayer(NEIGHBORS_MASK_ID)) instance.addLayer({
+    id: NEIGHBORS_MASK_ID,
+    type: 'fill',
+    source: NEIGHBORS_SOURCE_ID,
+    paint: { 'fill-color': satellite ? '#102c38' : '#b7e5ed', 'fill-opacity': 1 },
   });
-  const countResponse = await fetch(`${NOAH_QUERY}?${params}`, { signal });
-  if (!countResponse.ok) throw new Error('NOAH count unavailable');
-  const countData: unknown = await countResponse.json();
-  if (!countData || typeof countData !== 'object' || !('count' in countData) ||
-      typeof countData.count !== 'number' || !Number.isSafeInteger(countData.count) ||
-      countData.count < 0) throw new Error('Invalid NOAH count');
-  if (countData.count > 2000) return { tooMany: true as const };
-  if (countData.count === 0) return { tooMany: false as const, data: emptyHazard() };
-
-  params.delete('returnCountOnly');
-  params.set('outFields', 'Var');
-  params.set('returnGeometry', 'true');
-  params.set('resultRecordCount', '2000');
-  params.set('maxAllowableOffset', '0.00002');
-  params.set('geometryPrecision', '5');
-  params.set('f', 'geojson');
-  const response = await fetch(`${NOAH_QUERY}?${params}`, { signal });
-  if (!response.ok) throw new Error('NOAH geometry unavailable');
-  const data: unknown = await response.json();
-  if (!data || typeof data !== 'object' || !('type' in data) ||
-      data.type !== 'FeatureCollection' || !('features' in data) ||
-      !Array.isArray(data.features) || data.features.length !== countData.count ||
-      'error' in data || ('exceededTransferLimit' in data && data.exceededTransferLimit))
-    throw new Error('Incomplete NOAH geometry');
-  return { tooMany: false as const, data: data as FeatureCollection<Polygon | MultiPolygon> };
+  else instance.setPaintProperty(NEIGHBORS_MASK_ID, 'fill-color',
+    satellite ? '#102c38' : '#b7e5ed');
 }
 
-function addHazardLayer(instance: LibreMap, data: FeatureCollection<Polygon | MultiPolygon>,
-  visible: boolean) {
-  if (!instance.getSource(HAZARD_SOURCE_ID)) {
-    instance.addSource(HAZARD_SOURCE_ID, { type: 'geojson', data });
-  }
-  if (!instance.getLayer(HAZARD_LAYER_ID)) {
-    const layers = instance.getStyle().layers;
-    const beforeId = layers.find(layer =>
-      (layer.type === 'fill' || layer.type === 'fill-extrusion') &&
-      'source-layer' in layer && layer['source-layer'] === 'building')?.id
-      ?? layers.find(layer => layer.type === 'symbol')?.id;
-    instance.addLayer({
-      id: HAZARD_LAYER_ID,
-      type: 'fill',
-      source: HAZARD_SOURCE_ID,
-      paint: {
-        'fill-color': ['match', ['to-number', ['get', 'Var']], 1, '#f3c949',
-          2, '#f08350', 3, '#d9434b', 'rgba(0,0,0,0)'],
-        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, .7, 15, .8, 18, .84],
-      },
-      layout: { visibility: visible ? 'visible' : 'none' },
-    }, beforeId);
-  }
+function hazardSource(scenario: HazardScenario): VectorSourceSpecification {
+  const bounds = scenario === '100yr' ? hazard100.dataBounds : hazardOverview.dataBounds;
+  return {
+    type: 'vector',
+    tiles: [`flowhazard://noah/${scenario}/{z}/{x}/{y}.pbf`],
+    bounds: bounds as [number, number, number, number],
+    minzoom: 0,
+    maxzoom: 14,
+  };
 }
 
-function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolean) {
-  if (instance.getLayer(HAZARD_LAYER_ID))
-    instance.setLayoutProperty(HAZARD_LAYER_ID, 'visibility', hazardVisible ? 'visible' : 'none');
+function hazardLayer(visible: boolean, scenario: HazardScenario): LayerSpecification {
+  return {
+    id: HAZARD_LAYER_ID,
+    type: 'fill',
+    source: HAZARD_SOURCE_ID,
+    'source-layer': `flood_${scenario}`,
+    paint: {
+      'fill-color': ['match', ['to-number', ['get', 'Var']], 1, '#f3c949',
+        2, '#f08350', 3, '#d9434b', 'rgba(0,0,0,0)'],
+      'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, .7, 15, .8, 18, .84],
+    },
+    layout: { visibility: visible ? 'visible' : 'none' },
+  };
+}
+
+function hazardBeforeId(layers: LayerSpecification[]) {
+  return layers.find(layer =>
+    (layer.type === 'fill' || layer.type === 'fill-extrusion') &&
+    'source-layer' in layer && layer['source-layer'] === 'building')?.id
+    ?? layers.find(layer => layer.type === 'symbol')?.id;
+}
+
+function withLocalHazard(style: StyleSpecification, visible: boolean,
+  satellite: boolean, scenario: HazardScenario): StyleSpecification {
+  const layers = style.layers.map(layer => {
+    if (layer.type !== 'symbol' || !('source-layer' in layer)) return layer;
+    let restriction: FilterSpecification | undefined;
+    if (layer['source-layer'] === 'place') {
+      restriction = ['within', PHILIPPINE_PLACE_AREA];
+    } else if (layer['source-layer'] === 'water_name') {
+      restriction = ['!', ['match', ['get', 'class'], ['sea', 'ocean'], true, false]];
+    }
+    return restriction ? {
+      ...layer,
+      filter: ['all', ...(layer.filter ? [layer.filter] : []), restriction] as FilterSpecification,
+    } : layer;
+  });
+  const sources: StyleSpecification['sources'] = {
+    ...style.sources,
+    [NEIGHBORS_SOURCE_ID]: { type: 'geojson' as const, data: COUNTRY_MASK_DATA },
+  };
+  if (hazardProtocolRegistered) {
+    const beforeId = hazardBeforeId(layers);
+    const beforeIndex = beforeId ? layers.findIndex(layer => layer.id === beforeId) : layers.length;
+    layers.splice(beforeIndex, 0, hazardLayer(visible, scenario));
+    sources[HAZARD_SOURCE_ID] = hazardSource(scenario);
+  }
+  layers.push({
+    id: NEIGHBORS_MASK_ID,
+    type: 'fill',
+    source: NEIGHBORS_SOURCE_ID,
+    paint: { 'fill-color': satellite ? '#102c38' : '#b7e5ed', 'fill-opacity': 1 },
+  });
+  return {
+    ...style,
+    sources,
+    layers,
+  };
+}
+
+function addHazardLayer(instance: LibreMap, visible: boolean, scenario: HazardScenario) {
+  if (!instance.getSource(HAZARD_SOURCE_ID))
+    instance.addSource(HAZARD_SOURCE_ID, hazardSource(scenario));
+  if (!instance.getLayer(HAZARD_LAYER_ID))
+    instance.addLayer(hazardLayer(visible, scenario), hazardBeforeId(instance.getStyle().layers));
+}
+
+function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolean,
+  heatVisible = !hazardVisible) {
+  if (instance.getLayer(HAZARD_LAYER_ID)) {
+    const visibility = hazardVisible ? 'visible' : 'none';
+    if (instance.getLayoutProperty(HAZARD_LAYER_ID, 'visibility') !== visibility)
+      instance.setLayoutProperty(HAZARD_LAYER_ID, 'visibility', visibility);
+  }
+  if (instance.getLayer(HAZARD_BUILDING_MASK_ID)) {
+    const visibility = hazardVisible ? 'visible' : 'none';
+    if (instance.getLayoutProperty(HAZARD_BUILDING_MASK_ID, 'visibility') !== visibility)
+      instance.setLayoutProperty(HAZARD_BUILDING_MASK_ID, 'visibility', visibility);
+  }
   for (const level of [1, 2, 3]) {
     const id = `flow-sensor-heat-${level}`;
-    if (instance.getLayer(id))
-      instance.setLayoutProperty(id, 'visibility', hazardVisible ? 'none' : 'visible');
+    if (instance.getLayer(id)) {
+      const visibility = heatVisible ? 'visible' : 'none';
+      if (instance.getLayoutProperty(id, 'visibility') !== visibility)
+        instance.setLayoutProperty(id, 'visibility', visibility);
+    }
   }
 }
 
@@ -225,18 +426,45 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
 
   for (const building of buildings) instance.moveLayer(building.id, beforeId);
 
+  const buildingSource = [...buildings, ...buildingExtrusions].find((layer) =>
+    'source' in layer && typeof layer.source === 'string');
+  if (buildingSource && 'source' in buildingSource && typeof buildingSource.source === 'string') {
+    if (!instance.getLayer(HAZARD_BUILDING_MASK_ID)) instance.addLayer({
+      id: HAZARD_BUILDING_MASK_ID,
+      type: 'fill',
+      source: buildingSource.source,
+      'source-layer': 'building',
+      minzoom: 12,
+      layout: { visibility: 'none' },
+      paint: {
+        'fill-color': satellite ? '#aeb2bb' : '#e9edef',
+        'fill-outline-color': satellite ? '#87939d' : '#dde4e8',
+        'fill-opacity': 1,
+      },
+    }, beforeId);
+    else {
+      instance.setPaintProperty(HAZARD_BUILDING_MASK_ID, 'fill-color',
+        satellite ? '#aeb2bb' : '#e9edef');
+      instance.setPaintProperty(HAZARD_BUILDING_MASK_ID, 'fill-outline-color',
+        satellite ? '#87939d' : '#dde4e8');
+      instance.moveLayer(HAZARD_BUILDING_MASK_ID, beforeId);
+    }
+  }
 
 
   const color: ExpressionSpecification = ['interpolate', ['linear'],
     ['to-number', ['get', 'render_height'], 0],
     0, '#aeb2bb', 8, '#9aa4b6', 16, '#7895c8',
     30, '#547bc7', 70, '#3562b8'];
-  const opacity = satellite ? 0.86 : 0.96;
+  const opacity = 1;
   if (buildingExtrusions.length) {
     if (instance.getLayer(BUILDINGS_3D_ID)) instance.removeLayer(BUILDINGS_3D_ID);
     for (const extrusion of buildingExtrusions) {
+      instance.setLayerZoomRange(extrusion.id, BUILDINGS_3D_MIN_ZOOM, 24);
       instance.setPaintProperty(extrusion.id, 'fill-extrusion-color', color);
       instance.setPaintProperty(extrusion.id, 'fill-extrusion-opacity', opacity);
+      instance.setPaintProperty(extrusion.id, 'fill-extrusion-height',
+        ['to-number', ['get', 'render_height'], 0]);
       instance.moveLayer(extrusion.id, beforeId);
     }
   } else {
@@ -252,13 +480,12 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
           type: 'fill-extrusion',
           source: building.source,
           'source-layer': 'building',
-          minzoom: 14,
+          minzoom: BUILDINGS_3D_MIN_ZOOM,
           filter: ['!=', ['get', 'hide_3d'], true],
           paint: {
             'fill-extrusion-color': color,
             'fill-extrusion-opacity': opacity,
-            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'],
-              14, 0, 15, ['to-number', ['get', 'render_height'], 0]],
+            'fill-extrusion-height': ['to-number', ['get', 'render_height'], 0],
             'fill-extrusion-base': ['to-number', ['get', 'render_min_height'], 0],
           },
         }, beforeId);
@@ -342,9 +569,10 @@ export const MapCanvas = forwardRef<MapHandle, {
   evacuationSites: MappedEvacuationSite[];
   showEvacuationSites: boolean;
   showHazard: boolean;
+  hazardScenario: HazardScenario;
   onHazardStateChange: (state: HazardState) => void;
 }>(function MapCanvas({ onFlatViewChange, evacuationSites, showEvacuationSites,
-  showHazard, onHazardStateChange }, ref) {
+  showHazard, hazardScenario, onHazardStateChange }, ref) {
   const flow = useFlow();
   const latest = useRef(flow);
   latest.current = flow;
@@ -356,12 +584,15 @@ export const MapCanvas = forwardRef<MapHandle, {
   sitesVisibleRef.current = showEvacuationSites;
   const hazardVisibleRef = useRef(showHazard);
   hazardVisibleRef.current = showHazard;
+  const hazardScenarioRef = useRef(hazardScenario);
+  hazardScenarioRef.current = hazardScenario;
+  const appliedHazardScenario = useRef<HazardScenario | null>(null);
   const hazardStateChange = useRef(onHazardStateChange);
   hazardStateChange.current = onHazardStateChange;
-  const hazardData = useRef<FeatureCollection<Polygon | MultiPolygon>>(emptyHazard());
-  const hazardRequest = useRef<AbortController | null>(null);
-  const hazardRequestId = useRef(0);
-  const hazardBoundsKey = useRef('');
+  const hazardArchiveReady = useRef(false);
+  const hazardArchiveFailed = useRef(false);
+  const hazardHadDataInView = useRef(false);
+  const lastHeatSnapshot = useRef('');
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<LibreMap | null>(null);
@@ -382,101 +613,55 @@ export const MapCanvas = forwardRef<MapHandle, {
   const lastFocused = useRef<string | null>(null);
   const viewTransitioning = useRef<number | null>(null);
   const nextViewTransition = useRef(0);
-  const previousTilt = useRef<{
-    center: [number, number]; zoom: number; pitch: number; bearing: number;
-  } | null>(null);
+  const nodeReturnView = useRef<CameraView | null>(null);
+  const evacuationReturnView = useRef<CameraView | null>(null);
+  const restorePitchAfterZoomOut = useRef(false);
 
   const refreshHazard = useCallback((instance: LibreMap) => {
     if (!hazardVisibleRef.current || !instance.getSource(HAZARD_SOURCE_ID)) return;
-    const clear = (key: string) => {
-      hazardData.current = emptyHazard();
-      const source = instance.getSource(HAZARD_SOURCE_ID) as GeoJSONSource | undefined;
-      if (source) void source.setData(hazardData.current);
-      hazardBoundsKey.current = key;
-      setObservationLayerVisibility(instance, false);
-    };
-    if (instance.getZoom() < 12.5) {
-      if (hazardBoundsKey.current === '#zoom') return;
-      hazardRequest.current?.abort();
-      ++hazardRequestId.current;
-      clear('#zoom');
-      hazardStateChange.current('zoom');
-      return;
-    }
-    const bounds = instance.getBounds();
-    const box = [
-      Math.max(bounds.getWest(), HAZARD_BOUNDS[0]),
-      Math.max(bounds.getSouth(), HAZARD_BOUNDS[1]),
-      Math.min(bounds.getEast(), HAZARD_BOUNDS[2]),
-      Math.min(bounds.getNorth(), HAZARD_BOUNDS[3]),
-    ];
-    if (box[0] >= box[2] || box[1] >= box[3]) {
-      if (hazardBoundsKey.current === '#outside') return;
-      hazardRequest.current?.abort();
-      ++hazardRequestId.current;
-      clear('#outside');
-      hazardStateChange.current('empty');
-      return;
-    }
-    const key = box.map(value => value.toFixed(5)).join(',');
-    if (key === hazardBoundsKey.current) return;
-    hazardRequest.current?.abort();
-    const id = ++hazardRequestId.current;
-    clear(key);
-    hazardStateChange.current('loading');
-    const controller = new AbortController();
-    hazardRequest.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 18_000);
-    void fetch(`/api/flood-hazard?bbox=${encodeURIComponent(key)}`, { signal: controller.signal })
-      .then(async response => {
-        if (response.status === 422) {
-          if (hazardRequestId.current === id) {
-            clear(key);
-            hazardStateChange.current('zoom');
-          }
-          return;
-        }
-        let data: FeatureCollection<Polygon | MultiPolygon>;
-        if (response.status === 404) {
-          const direct = await fetchNoahDirectly(key, controller.signal);
-          if (direct.tooMany) {
-            if (hazardRequestId.current === id) {
-              clear(key);
-              hazardStateChange.current('zoom');
-            }
-            return;
-          }
-          data = direct.data;
-        } else {
-          if (!response.ok) throw new Error('Hazard map unavailable');
-          data = await response.json();
-        }
-        if (data.type !== 'FeatureCollection' || !Array.isArray(data.features))
-          throw new Error('Invalid hazard map');
-        if (hazardRequestId.current !== id || map.current !== instance) return;
-        hazardData.current = data;
-        const current = instance.getSource(HAZARD_SOURCE_ID) as GeoJSONSource | undefined;
-        if (current) void current.setData(data);
-        setObservationLayerVisibility(instance, hazardVisibleRef.current && data.features.length > 0);
-        hazardStateChange.current(data.features.length ? 'ready' : 'empty');
-      })
-      .catch(() => {
-        if (hazardRequestId.current !== id) return;
-        clear(key);
+    if (!hazardArchiveReady.current || !instance.isSourceLoaded(HAZARD_SOURCE_ID)) {
+      if (hazardArchiveFailed.current) {
+        setObservationLayerVisibility(instance, true, true);
         hazardStateChange.current('unavailable');
-      })
-      .finally(() => {
-        clearTimeout(timeout);
-        if (hazardRequest.current === controller) hazardRequest.current = null;
-      });
+      } else if (!hazardHadDataInView.current) {
+        setObservationLayerVisibility(instance, true, true);
+        hazardStateChange.current('loading');
+      }
+      return;
+    }
+    const features = instance.queryRenderedFeatures({ layers: [HAZARD_LAYER_ID] });
+    if (features.length) {
+      hazardArchiveFailed.current = false;
+      hazardHadDataInView.current = true;
+      setObservationLayerVisibility(instance, true);
+      hazardStateChange.current('ready');
+      return;
+    }
+    hazardHadDataInView.current = false;
+    setObservationLayerVisibility(instance, true, true);
+    hazardStateChange.current(hazardArchiveFailed.current ? 'unavailable' : 'empty');
   }, []);
 
+  const dismissEvacuation = useCallback((instance: LibreMap) => {
+    selectedEvacuationId.current = null;
+    evacuationReturnView.current = null;
+    sitePopup.current?.remove();
+    sitePopup.current = null;
+    selectedFootprintKey.current = '';
+    const footprint = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
+    if (footprint) void footprint.setData(emptyFootprint());
+  }, []);
 
   const focus = useCallback((id: string) => {
     const instance = map.current;
     const el = container.current;
     const node = latest.current.nodes.find((item) => item.id === id);
     if (!instance || !el || !node) return;
+    const target: [number, number] = [node.longitude, node.latitude];
+    if (!nodeReturnView.current) nodeReturnView.current = returnViewAt(instance, target);
+    else nodeReturnView.current.center = target;
+    if (selectedEvacuationId.current) dismissEvacuation(instance);
+    restorePitchAfterZoomOut.current = false;
 
     const sheet = document.getElementById('details');
     const mobile = window.innerWidth <= 760;
@@ -498,7 +683,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       ],
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
     });
-  }, []);
+  }, [dismissEvacuation]);
 
   const refreshSelectedFootprint = useCallback((instance: LibreMap) => {
     const source = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
@@ -539,10 +724,16 @@ export const MapCanvas = forwardRef<MapHandle, {
     const lib = library.current;
     const site = sitesRef.current.find(item => item.id === id);
     if (!instance || !lib || !site) return;
+    const target: [number, number] = [site.longitude, site.latitude];
+    if (!evacuationReturnView.current) evacuationReturnView.current = returnViewAt(instance, target);
+    else evacuationReturnView.current.center = target;
+    nodeReturnView.current = null;
+    restorePitchAfterZoomOut.current = false;
     for (const layer of [EVAC_SITE_ID, EVAC_ICON_LAYER_ID]) {
       if (instance.getLayer(layer)) instance.setLayoutProperty(layer, 'visibility', 'visible');
     }
     latest.current.closeDetails();
+    selectedEvacuationId.current = null;
     sitePopup.current?.remove();
     selectedEvacuationId.current = id;
     selectedFootprintKey.current = '';
@@ -571,31 +762,25 @@ export const MapCanvas = forwardRef<MapHandle, {
     links.append(directions);
     content.append(icon, heading, location, note, links);
 
-    sitePopup.current = new lib.Popup({ offset: 16, maxWidth: '290px',
+    sitePopup.current = new lib.Popup({ offset: 16, maxWidth: '290px', closeOnClick: false,
       className: 'flow-evacuation-popup' })
       .setLngLat([site.longitude, site.latitude]).setDOMContent(content).addTo(instance);
     sitePopup.current.on('close', () => {
       if (selectedEvacuationId.current !== id) return;
       selectedEvacuationId.current = null;
+      sitePopup.current = null;
       selectedFootprintKey.current = '';
       const currentSource = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
       if (currentSource) void currentSource.setData(emptyFootprint());
+      const returnView = evacuationReturnView.current;
+      evacuationReturnView.current = null;
+      if (returnView) instance.easeTo({ ...returnView,
+        duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
     });
     instance.easeTo({ center: [site.longitude, site.latitude],
       zoom: Math.max(15, instance.getZoom()),
       pitch: CITY_PITCH, bearing: CITY_BEARING,
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
-  }, []);
-
-  const rememberTiltedView = useCallback((instance: LibreMap) => {
-    if (instance.getPitch() <= 1) return;
-    const center = instance.getCenter();
-    previousTilt.current = {
-      center: [center.lng, center.lat],
-      zoom: instance.getZoom(),
-      pitch: instance.getPitch(),
-      bearing: instance.getBearing(),
-    };
   }, []);
 
   const finishViewTransitionIfIdle = useCallback((instance: LibreMap, transitionId: number) => {
@@ -607,24 +792,26 @@ export const MapCanvas = forwardRef<MapHandle, {
   const showPhilippines = useCallback((transitionId?: number) => {
     const instance = map.current;
     if (!instance) return;
-    rememberTiltedView(instance);
-    instance.fitBounds(PHILIPPINES_BOUNDS, {
-      padding: 32,
-      maxZoom: 6,
+    nodeReturnView.current = null;
+    dismissEvacuation(instance);
+    restorePitchAfterZoomOut.current = false;
+    instance.fitBounds(PHILIPPINES_OVERVIEW_BOUNDS, {
+      padding: overviewPadding(instance.getContainer().clientWidth),
       pitch: 0,
       bearing: 0,
       duration: 320,
     }, transitionId === undefined ? undefined : { flowViewTransition: transitionId });
     if (transitionId !== undefined) finishViewTransitionIfIdle(instance, transitionId);
-  }, [finishViewTransitionIfIdle, rememberTiltedView]);
+  }, [dismissEvacuation, finishViewTransitionIfIdle]);
 
   const fit = useCallback(() => {
     const instance = map.current;
     const lib = library.current;
     if (!instance || !lib || viewTransitioning.current !== null) return;
+    dismissEvacuation(instance);
+    restorePitchAfterZoomOut.current = false;
     const transitionId = ++nextViewTransition.current;
     viewTransitioning.current = transitionId;
-    rememberTiltedView(instance);
     const nodes = latest.current.visibleNodes.filter((node) =>
       Number.isFinite(node.latitude) && Number.isFinite(node.longitude),
     );
@@ -649,25 +836,42 @@ export const MapCanvas = forwardRef<MapHandle, {
       duration: 320,
     }, { flowViewTransition: transitionId });
     finishViewTransitionIfIdle(instance, transitionId);
-  }, [finishViewTransitionIfIdle, rememberTiltedView, showPhilippines]);
+  }, [dismissEvacuation, finishViewTransitionIfIdle, showPhilippines]);
+
+  const wideView = useCallback(() => {
+    const instance = map.current;
+    if (!instance || viewTransitioning.current !== null) return;
+    dismissEvacuation(instance);
+    restorePitchAfterZoomOut.current = false;
+    const transitionId = ++nextViewTransition.current;
+    viewTransitioning.current = transitionId;
+    instance.easeTo({
+      center: cameraView(instance).center,
+      zoom: Math.max(instance.getMinZoom(), Math.min(instance.getZoom() - 2.5, WIDE_VIEW_ZOOM)),
+      pitch: 0,
+      bearing: 0,
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
+    }, { flowViewTransition: transitionId });
+    finishViewTransitionIfIdle(instance, transitionId);
+  }, [dismissEvacuation, finishViewTransitionIfIdle]);
 
   useImperativeHandle(ref, () => ({
     focus,
     focusEvacuation,
     fit,
+    wideView,
     showPhilippines,
     restoreTilt() {
       const instance = map.current;
       if (!instance || viewTransitioning.current !== null) return;
+      restorePitchAfterZoomOut.current = false;
       const transitionId = ++nextViewTransition.current;
       viewTransitioning.current = transitionId;
       instance.easeTo({
-        ...(previousTilt.current ?? {
-          center: METRO_MANILA_CENTER,
-          zoom: 15,
-          pitch: CITY_PITCH,
-          bearing: CITY_BEARING,
-        }),
+        center: cameraView(instance).center,
+        zoom: Math.max(instance.getZoom(), FULL_TILT_ZOOM),
+        pitch: CITY_PITCH,
+        bearing: CITY_BEARING,
         duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
       }, { flowViewTransition: transitionId });
       finishViewTransitionIfIdle(instance, transitionId);
@@ -681,6 +885,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       if (!instance || !lib ||
           longitude < PHILIPPINES_BOUNDS[0][0] || longitude > PHILIPPINES_BOUNDS[1][0] ||
           latitude < PHILIPPINES_BOUNDS[0][1] || latitude > PHILIPPINES_BOUNDS[1][1]) return false;
+      restorePitchAfterZoomOut.current = false;
       userMarker.current?.remove();
       const element = document.createElement('div');
       element.className = 'user-dot';
@@ -692,7 +897,7 @@ export const MapCanvas = forwardRef<MapHandle, {
         pitch: CITY_PITCH, bearing: CITY_BEARING, duration: 320 });
       return true;
     },
-  }), [finishViewTransitionIfIdle, focus, focusEvacuation, fit, showPhilippines]);
+  }), [finishViewTransitionIfIdle, focus, focusEvacuation, fit, showPhilippines, wideView]);
 
   useEffect(() => {
     if (!flow.ready) return;
@@ -709,11 +914,21 @@ export const MapCanvas = forwardRef<MapHandle, {
     async function initialize() {
       try {
 
-        const [lib, style] = await Promise.all([
+        const [lib, baseStyle] = await Promise.all([
           import('maplibre-gl'),
           loadBasemap(initialMode, controller.signal),
         ]);
         if (cancelled || !container.current) return;
+        if (hazardVisibleRef.current) {
+          try {
+            await prepareHazardProtocol(lib);
+          } catch {
+            hazardArchiveFailed.current = true;
+          }
+        }
+        if (cancelled || !container.current) return;
+        const style = withLocalHazard(baseStyle, hazardVisibleRef.current,
+          initialMode === 'satellite', hazardScenarioRef.current);
         library.current = lib;
         const siteIcon = new Image(96, 120);
         evacuationIcon.current = siteIcon;
@@ -732,6 +947,8 @@ export const MapCanvas = forwardRef<MapHandle, {
           location.latitude <= PHILIPPINES_BOUNDS[1][1];
         const initialCenter: [number, number] = inPhilippines
           ? [location.longitude, location.latitude] : METRO_MANILA_CENTER;
+        let overviewZoom = 3;
+        let overviewCenter = new lib.LngLat(120, 13);
         instance = new lib.Map({
           container: container.current,
           center: initialCenter,
@@ -739,16 +956,33 @@ export const MapCanvas = forwardRef<MapHandle, {
           pitch: CITY_PITCH,
           bearing: CITY_BEARING,
           canvasContextAttributes: { antialias: true },
+          maxTileCacheZoomLevels: window.innerWidth <= 760 ? 5 : 8,
           maxBounds: MAP_LIMITS,
           renderWorldCopies: false,
-          transformCameraUpdate: ({ center }) => {
+          transformCameraUpdate: ({ center, zoom, pitch }) => {
+            if (zoom <= overviewZoom + 0.01) {
+              return { center: overviewCenter, pitch: 0, bearing: 0 };
+            }
+            // A pitched wide view exposes far more tiles than a flat one.
+            const pitchLimit = CITY_PITCH * Math.max(0, Math.min(1,
+              (zoom - WIDE_VIEW_ZOOM) / (FULL_TILT_ZOOM - WIDE_VIEW_ZOOM)));
+            if (pitch > pitchLimit + 0.01 && pitchLimit < CITY_PITCH) {
+              restorePitchAfterZoomOut.current = true;
+            }
+            const constrainedPitch = restorePitchAfterZoomOut.current
+              ? pitchLimit : Math.min(pitch, pitchLimit);
+            if (restorePitchAfterZoomOut.current && zoom >= FULL_TILT_ZOOM)
+              restorePitchAfterZoomOut.current = false;
             const longitude = Math.min(PHILIPPINES_BOUNDS[1][0],
               Math.max(PHILIPPINES_BOUNDS[0][0], center.lng));
             const latitude = Math.min(PHILIPPINES_BOUNDS[1][1],
               Math.max(PHILIPPINES_BOUNDS[0][1], center.lat));
-            return longitude === center.lng && latitude === center.lat
-              ? {}
-              : { center: new lib.LngLat(longitude, latitude) };
+            return {
+              ...(longitude === center.lng && latitude === center.lat
+                ? {} : { center: new lib.LngLat(longitude, latitude) }),
+              ...(Math.abs(pitch - constrainedPitch) > 0.01
+                ? { pitch: constrainedPitch } : {}),
+            };
           },
           minZoom: 3,
           maxZoom: 19,
@@ -772,11 +1006,13 @@ export const MapCanvas = forwardRef<MapHandle, {
           if (instance) {
             selectedFootprintKey.current = '';
             addHeatLayers(instance, latest.current);
-            const hazardReady = hazardVisibleRef.current && hazardData.current.features.length > 0;
-            addHazardLayer(instance, hazardData.current, hazardReady);
-            setObservationLayerVisibility(instance, hazardReady);
+            if (hazardVisibleRef.current && hazardProtocolRegistered)
+              addHazardLayer(instance, true, hazardScenarioRef.current);
+            setObservationLayerVisibility(instance, hazardVisibleRef.current,
+              !hazardHadDataInView.current);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
+            addNeighborMask(instance, latest.current.basemap === 'satellite');
             if (hazardVisibleRef.current) refreshHazard(instance);
           }
         });
@@ -787,6 +1023,12 @@ export const MapCanvas = forwardRef<MapHandle, {
         instance.on('click', EVAC_ICON_LAYER_ID, event => {
           const id = event.features?.[0]?.properties?.id;
           if (typeof id === 'string') focusEvacuation(id);
+        });
+        instance.on('click', event => {
+          if (!selectedEvacuationId.current || !sitePopup.current) return;
+          const layers = [EVAC_SITE_ID, EVAC_ICON_LAYER_ID].filter(id => instance?.getLayer(id));
+          if (layers.length && instance?.queryRenderedFeatures(event.point, { layers }).length) return;
+          sitePopup.current.remove();
         });
         for (const layer of [EVAC_SITE_ID, EVAC_ICON_LAYER_ID]) {
           instance.on('mouseenter', layer, () => {
@@ -804,7 +1046,6 @@ export const MapCanvas = forwardRef<MapHandle, {
           }
           flatViewChange.current(instance.getPitch() <= 1);
           if (selectedEvacuationId.current) refreshSelectedFootprint(instance);
-          if (hazardVisibleRef.current) refreshHazard(instance);
         });
         instance.on('idle', () => {
           if (!cancelled && instance && selectedEvacuationId.current)
@@ -822,18 +1063,39 @@ export const MapCanvas = forwardRef<MapHandle, {
           }
         };
         instance.on('zoom', updateZoomTier);
+        instance.on('pitchend', event => {
+          if (event.originalEvent) restorePitchAfterZoomOut.current = false;
+        });
         updateZoomTier();
-        instance.on('error', () => {
+        instance.on('error', event => {
+          if ((event as typeof event & { sourceId?: string }).sourceId === HAZARD_SOURCE_ID ||
+              event.error?.message?.includes('pmtiles')) {
+            if (process.env.NODE_ENV !== 'production')
+              console.error('FLOW hazard source error:', event.error);
+            hazardArchiveFailed.current = true;
+            if (instance && hazardVisibleRef.current) refreshHazard(instance);
+            return;
+          }
           if (!cancelled) setMapIssue('Some map tiles could not load. Check your connection.');
         });
 
+        let previousCountryZoom: number | null = null;
         const updateCountryZoomLimit = () => {
           if (!instance) return;
+          const wasAtOverview = previousCountryZoom !== null &&
+            instance.getZoom() <= previousCountryZoom + 0.02;
           instance.resize();
-
-
-          const countryView = instance.cameraForBounds(PHILIPPINES_BOUNDS, { padding: 32 });
-          if (countryView) instance.setMinZoom(countryView.zoom);
+          const countryView = instance.cameraForBounds(PHILIPPINES_OVERVIEW_BOUNDS, {
+            padding: overviewPadding(instance.getContainer().clientWidth),
+          });
+          if (!countryView?.center || typeof countryView.zoom !== 'number') return;
+          overviewCenter = lib.LngLat.convert(countryView.center);
+          overviewZoom = countryView.zoom;
+          instance.setMinZoom(countryView.zoom);
+          previousCountryZoom = countryView.zoom;
+          if (wasAtOverview) instance.jumpTo({
+            center: overviewCenter, zoom: overviewZoom, pitch: 0, bearing: 0,
+          });
         };
         observer = new ResizeObserver(updateCountryZoomLimit);
         observer.observe(container.current);
@@ -849,25 +1111,25 @@ export const MapCanvas = forwardRef<MapHandle, {
     void initialize();
     return () => {
       cancelled = true;
-      hazardRequest.current?.abort();
-      ++hazardRequestId.current;
-      hazardBoundsKey.current = '';
       controller.abort();
       clearTimeout(timeout);
       observer?.disconnect();
       for (const marker of markers.current.values()) marker.remove();
       markers.current.clear();
       userMarker.current?.remove();
+      selectedEvacuationId.current = null;
       sitePopup.current?.remove();
+      sitePopup.current = null;
       if (evacuationIcon.current) evacuationIcon.current.onload = null;
       evacuationIcon.current = null;
-      selectedEvacuationId.current = null;
       selectedFootprintKey.current = '';
       instance?.remove();
       map.current = null;
       appliedStyle.current = null;
-      previousTilt.current = null;
+      nodeReturnView.current = null;
+      evacuationReturnView.current = null;
       viewTransitioning.current = null;
+      restorePitchAfterZoomOut.current = false;
     };
   }, [flow.ready, retry, focusEvacuation, refreshSelectedFootprint, refreshHazard]);
 
@@ -910,16 +1172,18 @@ export const MapCanvas = forwardRef<MapHandle, {
       .then((style) => {
         if (!cancelled) {
 
-          instance.setStyle(style, { diff: true });
+          instance.setStyle(withLocalHazard(style, hazardVisibleRef.current,
+            flow.basemap === 'satellite', hazardScenarioRef.current), { diff: true });
           appliedStyle.current = { basemap: flow.basemap, retry };
 
 
           const currentStyle = instance.getStyle();
           if (currentStyle?.name === style.name && currentStyle.layers?.length) {
             addHeatLayers(instance, latest.current);
-            const hazardReady = hazardVisibleRef.current && hazardData.current.features.length > 0;
-            addHazardLayer(instance, hazardData.current, hazardReady);
-            setObservationLayerVisibility(instance, hazardReady);
+            if (hazardVisibleRef.current && hazardProtocolRegistered)
+              addHazardLayer(instance, true, hazardScenarioRef.current);
+            setObservationLayerVisibility(instance, hazardVisibleRef.current,
+              !hazardHadDataInView.current);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
             if (hazardVisibleRef.current) refreshHazard(instance);
@@ -942,22 +1206,60 @@ export const MapCanvas = forwardRef<MapHandle, {
 
   useEffect(() => {
     const instance = map.current;
-    if (!engineVersion || !instance) return;
-    setObservationLayerVisibility(instance, showHazard && hazardData.current.features.length > 0);
-    if (showHazard) refreshHazard(instance);
-    else {
-      hazardRequest.current?.abort();
-      ++hazardRequestId.current;
-      hazardBoundsKey.current = '';
+    const lib = library.current;
+    if (!engineVersion || !instance || !lib) return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    if (showHazard) {
+      hazardArchiveFailed.current = false;
+      hazardStateChange.current('loading');
+      if (appliedHazardScenario.current !== hazardScenario) {
+        hazardHadDataInView.current = false;
+        if (instance.getLayer(HAZARD_LAYER_ID)) instance.removeLayer(HAZARD_LAYER_ID);
+        if (instance.getSource(HAZARD_SOURCE_ID)) instance.removeSource(HAZARD_SOURCE_ID);
+        appliedHazardScenario.current = hazardScenario;
+      }
+      if (instance.getLayer(HAZARD_LAYER_ID))
+        setObservationLayerVisibility(instance, true, !hazardHadDataInView.current);
+      void prepareHazardProtocol(lib).then(() => {
+        if (cancelled || map.current !== instance || !hazardVisibleRef.current) return;
+        hazardArchiveReady.current = true;
+        if (instance.getSource(HEAT_SOURCE_ID)) {
+          addHazardLayer(instance, true, hazardScenario);
+          setObservationLayerVisibility(instance, true, !hazardHadDataInView.current);
+          refreshHazard(instance);
+        }
+      }).catch(() => {
+        if (cancelled || map.current !== instance || !hazardVisibleRef.current) return;
+        hazardArchiveFailed.current = true;
+        refreshHazard(instance);
+      });
+      timeout = setTimeout(() => {
+        if (map.current !== instance || !hazardVisibleRef.current ||
+            (hazardArchiveReady.current && instance.isSourceLoaded(HAZARD_SOURCE_ID))) return;
+        hazardArchiveFailed.current = true;
+        refreshHazard(instance);
+      }, 20_000);
+    } else {
+      setObservationLayerVisibility(instance, false);
       hazardStateChange.current('off');
     }
-  }, [engineVersion, showHazard, refreshHazard]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [engineVersion, showHazard, hazardScenario, refreshHazard]);
 
   useEffect(() => {
     const instance = map.current;
     if (!engineVersion || !instance) return;
     const source = instance.getSource(HEAT_SOURCE_ID) as GeoJSONSource | undefined;
-    if (source) void source.setData(heatData(flow));
+    if (!source) return;
+    const data = heatData(flow);
+    const snapshot = JSON.stringify(data);
+    if (snapshot === lastHeatSnapshot.current) return;
+    lastHeatSnapshot.current = snapshot;
+    void source.setData(data);
   }, [engineVersion, flow.visibleNodes, flow.getStatus]);
 
   useEffect(() => {
@@ -966,6 +1268,11 @@ export const MapCanvas = forwardRef<MapHandle, {
     const source = instance.getSource(EVAC_SOURCE_ID) as GeoJSONSource | undefined;
     if (!source) return;
     void source.setData(evacuationData(evacuationSites));
+  }, [engineVersion, evacuationSites]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!engineVersion || !instance?.getSource(EVAC_SOURCE_ID)) return;
     for (const id of [EVAC_ICON_LAYER_ID]) {
       if (instance.getLayer(id)) instance.setLayoutProperty(id, 'visibility',
         showEvacuationSites ? 'visible' : 'none');
@@ -974,7 +1281,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       'visibility', instance.getLayer(EVAC_ICON_LAYER_ID) ? 'none'
         : showEvacuationSites ? 'visible' : 'none');
     if (!showEvacuationSites) sitePopup.current?.remove();
-  }, [engineVersion, evacuationSites, showEvacuationSites]);
+  }, [engineVersion, showEvacuationSites]);
 
   useEffect(() => {
     const instance = map.current;
@@ -1016,12 +1323,24 @@ export const MapCanvas = forwardRef<MapHandle, {
       return;
     }
 
-    const key = `${flow.selectedId}:${flow.expanded}`;
+    const key = flow.selectedId;
     if (lastFocused.current === key) return;
     lastFocused.current = key;
     const frame = requestAnimationFrame(() => focus(flow.selectedId!));
     return () => cancelAnimationFrame(frame);
-  }, [engineVersion, flow.selectedId, flow.expanded, focus]);
+  }, [engineVersion, flow.selectedId, focus]);
+
+  useEffect(() => {
+    if (!engineVersion || flow.selectedId || !nodeReturnView.current) return;
+    const returnView = nodeReturnView.current;
+    nodeReturnView.current = null;
+    const instance = map.current;
+    if (!instance || selectedEvacuationId.current) return;
+    restorePitchAfterZoomOut.current = false;
+    viewTransitioning.current = null;
+    instance.easeTo({ ...returnView,
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
+  }, [engineVersion, flow.selectedId]);
 
   return (
     <>

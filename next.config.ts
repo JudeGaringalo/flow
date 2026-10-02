@@ -6,6 +6,23 @@ const config: NextConfig = {
   async headers() {
     return [
       {
+        source: '/hazard/:version/:z/:x/:y.pbf.gz',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+          { key: 'Content-Type', value: 'application/x-protobuf' },
+          { key: 'Content-Encoding', value: 'gzip' }
+        ]
+      },
+      {
+        source: '/hazard/:version/:z/:x/:y.pbf',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable'
+          }
+        ]
+      },
+      {
         source: '/sw.js',
         headers: [
           {

@@ -1,0 +1,15 @@
+{
+  "ready": true,
+  "version": "ncr-5yr-v1",
+  "bounds": [
+    120.85,
+    14.32,
+    121.3,
+    14.86
+  ],
+  "minzoom": 0,
+  "maxzoom": 14,
+  "tileCount": 806,
+  "dataTiles": 488,
+  "detailedDataTiles": 454
+}

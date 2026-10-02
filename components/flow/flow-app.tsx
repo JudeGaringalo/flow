@@ -8,12 +8,14 @@ import { config } from '@/lib/config';
 import type { EvacuationSiteResponse, MappedEvacuationSite } from '@/lib/evacuation-sites';
 import type { MapHandle } from '@/lib/types';
 import { Icon } from './icon';
-import { MapCanvas, type HazardState } from './map-canvas';
+import { MapCanvas, type HazardScenario, type HazardState } from './map-canvas';
 import { NodeDetails } from './node-details';
 import { Dialogs, PwaRegistration } from './dialogs';
 
 export default function FlowApp() {
   ReactDOM.preconnect('https://tiles.openfreemap.org', { crossOrigin: 'anonymous' });
+  ReactDOM.preload('https://tiles.openfreemap.org/styles/liberty',
+    { as: 'fetch', crossOrigin: 'anonymous' });
   return (
     <FlowProvider>
       <Workspace />
@@ -30,14 +32,11 @@ function Workspace() {
   const [flatView, setFlatView] = useState(false);
   const [evacuationSites, setEvacuationSites] = useState<MappedEvacuationSite[]>([]);
   const [showEvacuationSites, setShowEvacuationSites] = useState(true);
-  const [showHazard, setShowHazard] = useState(false);
-  const [hazardState, setHazardState] = useState<HazardState>('off');
+  const [showHazard, setShowHazard] = useState(true);
+  const [hazardScenario, setHazardScenario] = useState<HazardScenario>('100yr');
+  const [hazardState, setHazardState] = useState<HazardState>('loading');
   const [siteState, setSiteState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [siteRequest, setSiteRequest] = useState(0);
-
-  useEffect(() => {
-    if (f.selectedId) setShowHazard(true);
-  }, [f.selectedId]);
 
   useEffect(() => {
     if (!f.ready) return;
@@ -212,7 +211,8 @@ function Workspace() {
         >
           <MapCanvas ref={mapRef} onFlatViewChange={setFlatView}
             evacuationSites={evacuationSites} showEvacuationSites={showEvacuationSites}
-            showHazard={showHazard} onHazardStateChange={setHazardState} />
+            showHazard={showHazard} hazardScenario={hazardScenario}
+            onHazardStateChange={setHazardState} />
           <div
             className="search-dock"
             ref={searchDock}
@@ -336,11 +336,10 @@ function Workspace() {
             </div>
             <button
               className="map-btn fit-control"
-              aria-label={flatView ? 'Return to tilted view'
-                : f.visibleNodes.length ? 'Fit all monitoring points' : 'Show Philippines'}
+              aria-label={flatView ? 'Return to tilted view' : 'Show wide view'}
               onClick={() => {
                 if (flatView) mapRef.current?.restoreTilt();
-                else mapRef.current?.fit();
+                else mapRef.current?.wideView();
               }}
             >
               <Icon name={flatView ? 'tilt' : 'expand'} />
@@ -365,7 +364,7 @@ function Workspace() {
             {showHazard && <div className="hazard-map-key" role="status">
               <div className="hazard-map-key-heading">
                 <strong>Modeled flood hazard</strong>
-                <span>{f.selected ? `Near ${f.selected.name}` : 'NOAH · 5-year scenario'}</span>
+                <span>NOAH · {hazardScenario === '100yr' ? '100-year' : '5-year'} scenario</span>
               </div>
               {f.selected && <div className="hazard-live-node">
                 <span className="status-dot" style={{ background: f.getStatus(f.selected).color }} />
@@ -380,7 +379,7 @@ function Workspace() {
                 {hazardState === 'loading' ? 'Loading mapped areas…'
                   : hazardState === 'zoom' ? 'Zoom in for detailed hazard areas.'
                     : hazardState === 'empty' ? 'No mapped areas in view; coverage varies.'
-                      : hazardState === 'unavailable' ? 'Hazard layer unavailable. Try moving the map.'
+                      : hazardState === 'unavailable' ? 'Hazard layer unavailable. Try again later.'
                         : 'Preparing mapped areas…'}
               </small>}
               <small>Scenario map, not current floodwater.</small>
@@ -404,7 +403,9 @@ function Workspace() {
       </main>
       <Dialogs mapRef={mapRef} evacuationSites={evacuationSites}
         showEvacuationSites={showEvacuationSites} setShowEvacuationSites={setShowEvacuationSites}
-        showHazard={showHazard} setShowHazard={setShowHazard} hazardState={hazardState}
+        showHazard={showHazard} setShowHazard={setShowHazard}
+        hazardScenario={hazardScenario} setHazardScenario={setHazardScenario}
+        hazardState={hazardState}
         siteState={siteState} onRetrySites={() => setSiteRequest(value => value + 1)}
         onSelectEvacuation={id => {
           setShowEvacuationSites(true);

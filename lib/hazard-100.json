@@ -1,0 +1,27 @@
+{
+  "ready": true,
+  "version": "ph-100yr-gzip-v1",
+  "overviewBounds": [
+    115.8,
+    4.4,
+    127.2,
+    21.4
+  ],
+  "overviewMaxzoom": 9,
+  "detailBounds": [
+    120.85,
+    14.32,
+    121.3,
+    14.86
+  ],
+  "maxzoom": 14,
+  "dataBounds": [
+    116.930501,
+    5.365893,
+    126.565191,
+    20.933008
+  ],
+  "tileCount": 1406,
+  "dataTiles": 837,
+  "compressed": true
+}

@@ -1,0 +1,20 @@
+{
+  "ready": true,
+  "version": "ph-5yr-z8-gzip-v1",
+  "bounds": [
+    115.8,
+    4.4,
+    127.2,
+    21.4
+  ],
+  "maxzoom": 8,
+  "dataBounds": [
+    117.401714,
+    6.015119,
+    126.565191,
+    18.513439
+  ],
+  "tileCount": 173,
+  "dataTiles": 68,
+  "compressed": true
+}

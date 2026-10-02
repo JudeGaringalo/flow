@@ -43,6 +43,7 @@ export interface MapHandle {
   focus: (id: string) => void;
   focusEvacuation: (id: string) => void;
   fit: () => void;
+  wideView: () => void;
   restoreTilt: () => void;
   showPhilippines: () => void;
   zoomBy: (delta: number) => void;

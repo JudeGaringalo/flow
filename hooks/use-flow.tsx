@@ -183,6 +183,7 @@ function useFlowController() {
       const incoming = await loadNodes();
       if (!mounted.current || request !== requestRef.current) return;
       setNodes(incoming);
+      setNow(Date.now());
       setConnection('live');
       setConnectionError('');
     } catch (error) {
@@ -207,7 +208,6 @@ function useFlowController() {
     } catch { }
     setSelectedId(new URLSearchParams(location.hash.slice(1)).get('node'));
     setReady(true);
-    const timer = setInterval(() => setNow(Date.now()), 1000);
     const network = () => setOnline(navigator.onLine);
     const hash = () => {
       setSelectedId(new URLSearchParams(location.hash.slice(1)).get('node'));
@@ -219,7 +219,6 @@ function useFlowController() {
     return () => {
       mounted.current = false;
       ++requestRef.current;
-      clearInterval(timer);
       toastTimers.current.forEach(clearTimeout);
       window.removeEventListener('online', network);
       window.removeEventListener('offline', network);
@@ -228,13 +227,39 @@ function useFlowController() {
   }, []);
 
   useEffect(() => {
+    const current = Date.now();
+    let next = Infinity;
+    for (const node of nodes) {
+      const reportedAt = node.last_seen ? Date.parse(node.last_seen) : NaN;
+      if (!Number.isFinite(reportedAt)) continue;
+      const validFrom = reportedAt - 30000;
+      const staleAt = reportedAt + 120001;
+      if (validFrom > current) next = Math.min(next, validFrom);
+      else if (staleAt > current) next = Math.min(next, staleAt);
+    }
+    const timer = Number.isFinite(next)
+      ? setTimeout(() => setNow(Date.now()), Math.min(2147483647, Math.max(1, next - current)))
+      : undefined;
+    const resume = () => {
+      if (document.visibilityState === 'visible') setNow(Date.now());
+    };
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [nodes, now]);
+
+  useEffect(() => {
     if (!alertLocation || !navigator.geolocation) {
       alertBaseline.current = null;
       return;
     }
     const watch = navigator.geolocation.watchPosition(
-      position => setAlertLocation({
-        latitude: position.coords.latitude, longitude: position.coords.longitude
+      position => setAlertLocation(previous => {
+        const { latitude, longitude } = position.coords;
+        return previous?.latitude === latitude && previous.longitude === longitude
+          ? previous : { latitude, longitude };
       }),
       error => {
         if (error.code === error.PERMISSION_DENIED) {
@@ -397,10 +422,15 @@ function useFlowController() {
   const selected = nodes.find(node => node.id === selectedId) || null;
   const offline = !online || connection !== 'live';
   const getStatus = useCallback((node: FlowNode) => nodeStatus(node, now, offline), [now, offline]);
-  const visibleNodes = useMemo(() => nodes.filter(node => {
-    const match = `${node.name} ${node.area} ${node.id}`.toLowerCase().includes(query.toLowerCase());
-    return match && (filter === 'all' || getStatus(node).key === filter);
-  }), [nodes, query, filter, getStatus]);
+  const statusFilterClock = filter === 'all' ? 0 : now;
+  const visibleNodes = useMemo(() => {
+    const term = query.toLowerCase();
+    return nodes.filter(node => {
+      const match = `${node.name} ${node.area} ${node.id}`.toLowerCase().includes(term);
+      return match && (filter === 'all' ||
+        nodeStatus(node, statusFilterClock, offline).key === filter);
+    });
+  }, [nodes, query, filter, statusFilterClock, offline]);
   const nearby = useMemo(() => selected ? nodes.filter(node => node.id !== selected.id)
     .map(node => ({ ...node, distance: distance(selected, node) }))
     .filter(node => node.distance <= 3000).sort((a, b) => a.distance - b.distance).slice(0, 3) : [],
@@ -431,7 +461,7 @@ function useFlowController() {
     notificationPermission, requestAlertLocation,
     pushStatus, pushError, turnOffBackgroundAlerts, turnOnBackgroundAlerts,
     getStatus, visibleNodes, nearby, selectNode, closeDetails, refreshLive,
-    age: (node: FlowNode) => ageText(node.last_seen, now)
+    age: (node: FlowNode) => ageText(node.last_seen, Date.now())
   };
 }
 
