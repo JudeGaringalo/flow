@@ -3,30 +3,19 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import Image from 'next/image';
 import { useFlow } from '@/hooks/use-flow';
-import { distanceText } from '@/lib/core';
-import type { NodeStatus } from '@/lib/types';
+import { observationTrend, useObservationHistory } from '@/hooks/use-observation-history';
+import { useFlowIntelligence } from '@/hooks/use-flow-intelligence';
+import type { NodeWeatherState } from '@/hooks/use-node-weather';
+import { WEATHER_MAX_AGE_MS, weatherDescription } from '@/lib/node-weather';
 import { Icon } from './icon';
+import { RecentStatusChart } from './recent-status-chart';
 
-function observationSummary(status: NodeStatus) {
-  switch (status.key) {
-    case 'warning':
-      return 'The highest water threshold has been reached at this monitoring point. Avoid floodwater and check official local instructions. Conditions away from this sensor may differ.';
-    case 'watch':
-      return 'The second water threshold has been reached here. Stay alert for changes and check local advisories before traveling near this monitoring point.';
-    case 'advisory':
-      return 'The first water threshold has been reached here. Monitor updates and use caution around low-lying roads near this point.';
-    case 'below':
-      return 'All three water thresholds are currently below their trigger points at this sensor. This does not confirm that nearby roads are dry or safe.';
-    case 'fault':
-      return 'The latest probe combination could not be verified. The water level at this point is unconfirmed until a valid reading arrives.';
-    default:
-      return 'A recent valid sensor reading is unavailable. FLOW cannot confirm the current water level at this point. Check official local updates.';
-  }
-}
-
-export function NodeDetails() {
+export function NodeDetails({ weather }: { weather: NodeWeatherState }) {
   const f = useFlow();
   const node = f.selected;
+  const history = useObservationHistory(f.nodes, f.selectedId);
+  const intelligence = useFlowIntelligence(node, history.spans,
+    !!node && f.getStatus(node).key === 'unavailable');
   const drag = useRef<number | null>(null);
   const dragStartHeight = useRef(0);
   const bodyDrag = useRef<{ pointerId: number; startY: number; startHeight: number; active: boolean } | null>(null);
@@ -160,7 +149,15 @@ export function NodeDetails() {
   }, [node?.id, mobile]);
   if (!node) return null;
 
+  const now = Date.now();
+  const rainfall = weather.data?.daily.find(day => day.date === weather.data?.forecastDay)?.rainfallMm ?? null;
+  const localWeather = weather.data?.current && now - weather.data.current.at <= WEATHER_MAX_AGE_MS
+    ? weather.data.current : null;
+  const condition = weatherDescription(localWeather?.weatherCode ?? null);
+  const temperature = localWeather?.temperatureC;
   const status = f.getStatus(node);
+  const trend = status.level === null ? { label: 'Unconfirmed', delta: null }
+    : observationTrend(history.spans, now);
   const style = {
     '--status-color': status.color,
     ...(mobile && dragHeight !== null ? { height: `${dragHeight}px` } : {}),
@@ -168,7 +165,7 @@ export function NodeDetails() {
   return (
     <section
       ref={sheet}
-      className={'details' + (f.expanded ? ' expanded' : '')
+      className={'details node-report' + (f.expanded ? ' expanded' : '')
         + (dragging ? ' is-dragging' : '') + (closing ? ' is-closing' : '')}
       id="details"
       data-status={status.key}
@@ -270,7 +267,7 @@ export function NodeDetails() {
         </div>
         <p className="detail-subtitle">{node.area}</p>
         <div className="detail-freshness">
-          Latest report <strong>{f.age(node)}</strong>
+          Updated <strong>{f.age(node)}</strong>
         </div>
       </div>
       <div className="detail-content">
@@ -281,89 +278,87 @@ export function NodeDetails() {
                 <Icon name={status.key === 'unavailable' ? 'wifi-off' : status.key === 'fault' ? 'triangle' : 'flood'} />
               </div>
               <div className="condition-copy">
-                <h3>{status.label}</h3>
+                <h3>{status.level && status.level > 0 ? `Flood ${status.short}` : status.label}</h3>
                 <p>{status.level === null ? 'Current level unconfirmed'
                   : status.level === 0 ? 'Below first threshold' : `Level ${status.level} reached`}</p>
               </div>
             </div>
+            <span className="trend-indicator" title="Threshold trend from recent recorded readings"
+              data-trend={trend.delta === null ? 'unknown'
+              : trend.delta > 0 ? 'rising' : trend.delta < 0 ? 'falling' : 'steady'}>
+              {trend.label}
+            </span>
           </div>
           <div className="measure-cards">
             <div className="measure-card">
               <Icon name="waves" />
               <div>
-                <p>Water threshold</p>
+                <p>Water level</p>
                 <strong>{status.level === null ? 'Unconfirmed' : `Level ${status.level} / 3`}</strong>
+                <small>Threshold reading</small>
               </div>
             </div>
-            <div className="measure-card">
-              <Icon name="clock" />
-              <div>
-                <p>Last report</p>
-                <strong>{f.age(node)}</strong>
-              </div>
-            </div>
+            <button className="measure-card weather-card" type="button" onClick={() => f.setModal('weather')}
+              aria-label="View full weather forecast for this monitoring point" aria-haspopup="dialog">
+              <Icon name="rain" />
+              <span>
+                <span className="weather-card-label">Rainfall (24h)</span>
+                <strong aria-label={rainfall === null ? 'Rainfall estimate unavailable'
+                  : `${rainfall} millimeters of forecast rainfall for the full Philippine day`}>
+                  {rainfall === null ? '—' : rainfall > 0 && rainfall < 0.1 ? '<0.1 mm'
+                    : `${rainfall.toFixed(1)} mm`}
+                </strong>
+                <small>{rainfall === null ? weather.loading ? 'Loading estimate…' : 'Unavailable'
+                  : 'Full-day forecast'} · View weather</small>
+              </span>
+            </button>
           </div>
           <p className="measure-disclaimer">
-            Readings reflect fixed water-level thresholds. Below threshold does not mean a road is safe.
-            An old or faulty reading cannot confirm current conditions.
+            Threshold readings do not measure water depth in meters.
+          </p>
+          <p className="measure-disclaimer" aria-live="polite">
+            {temperature !== null && temperature !== undefined && <>{Math.round(temperature)}°C · </>}
+            {condition && <>{condition} · </>}
+            {rainfall !== null ? <>Rainfall: 12 AM–12 AM Philippine time · </> : null}
+            Weather estimates by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a>.
+            {weather.error && <> Refresh unavailable. <button type="button" className="text-btn"
+              disabled={weather.loading} onClick={weather.retryWeather}>Retry weather</button></>}
           </p>
         </div>
+        <RecentStatusChart key={node.id} spans={history.spans} now={now} recorded={history.recorded}
+          loading={history.loading} error={history.error} onRetry={history.retryHistory} />
         <section className="intelligence-card" aria-labelledby="intelligence-title">
           <div className="intelligence-heading">
             <Image src="/assets/flow-intelligence.png" alt="" width={32} height={30} unoptimized />
             <h3 id="intelligence-title">FLOW Intelligence</h3>
+            <button className="icon-btn" type="button" aria-label="About FLOW observations"
+              onClick={() => f.setModal('about')}><Icon name="info" /></button>
           </div>
-          <p className="summary-text">{observationSummary(status)}</p>
-          <p className="intelligence-basis">Based on the latest sensor observation · {f.age(node)}</p>
+          <p className="summary-text" aria-live="polite">{intelligence.summary}</p>
+          <p className="intelligence-basis">{intelligence.basis}
+            {intelligence.canRetry && <> <button className="text-btn" type="button"
+              onClick={intelligence.retry}>Retry AI</button></>}
+          </p>
         </section>
-        <section className="detail-section detail-observation">
-          <h3 className="device-heading">Sensor observation</h3>
-          <div className="probe-grid">
-            {node.probes.map((wet, index) => (
-              <div className="probe-cell" key={index}>
-                <span>Level {index + 1}</span>
-                <b className={wet ? 'wet' : ''}>
-                  {node.last_seen && node.quality !== 'unknown' ? (wet ? 'Reached' : 'Not reached') : 'Unknown'}
-                </b>
-              </div>
-            ))}
-          </div>
-          <p className="note">These are the last reported threshold states. They do not confirm conditions when the reading is unavailable.</p>
-          <dl>
-            {([
-              ['Device ID', node.id],
-              ['Last received', node.last_seen
-                ? new Date(node.last_seen).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })
-                : 'No report yet'],
-              ['Coordinates', `${node.latitude.toFixed(6)}, ${node.longitude.toFixed(6)}`]
-            ] as const).map(([label, value]) => (
-              <div className="keyvalue" key={label}><dt>{label}</dt><dd>{value}</dd></div>
-            ))}
-          </dl>
-        </section>
-        {f.nearby.length > 0 && (
-          <section className="detail-section detail-nearby">
-            <div className="section-line"><h3>Nearby monitoring points</h3><span>Within 3 km</span></div>
-            {f.nearby.map(near => (
-              <button className="nearby-row" key={near.id} onClick={() => f.selectNode(near.id)}>
-                <span className="nearby-icon"><Icon name="map-pin" /></span>
-                <span><strong>{near.name}</strong><small className="nearby-age">
-                  {distanceText(near.distance)} · {f.age(near)}
-                </small></span>
-                <span className="status-label" style={{ '--status-color': f.getStatus(near).color } as CSSProperties}>
-                  {f.getStatus(near).short}
-                </span>
-              </button>
-            ))}
+        <div className="support-cards">
+          <section className="support-card countdown" aria-labelledby="critical-time-title"
+            style={{ gridColumn: '1 / -1' }}>
+            <div className="support-heading">
+              <Icon name="clock" /><h3 id="critical-time-title">Estimated time to Level 3</h3>
+            </div>
+            <strong className="forecast-value">{intelligence.critical?.value}</strong>
+            <p>{intelligence.critical?.detail}</p>
           </section>
-        )}
+        </div>
+        <section className="recede-card" aria-labelledby="recede-title">
+          <span className="recede-icon" aria-hidden="true"><Icon name="arrow-down" /></span>
+          <div className="recede-copy">
+            <h3 id="recede-title">Estimated time to recede</h3>
+            <strong>{intelligence.recede?.value}</strong>
+            <p>{intelligence.recede?.detail}</p>
+          </div>
+        </section>
       </div>
-      <footer className="detail-footer">
-        <button className="primary-btn full" onClick={() => f.setModal('directions')}>
-          <Icon name="navigation" /><span>Get Directions</span>
-        </button>
-        <p>Directions to a monitoring point do not confirm a safe route.</p>
-      </footer>
     </section>
   );
 }

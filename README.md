@@ -1,122 +1,142 @@
 <p align="center">
-  <img src="public/assets/flow-wordmark.svg" alt="FLOW â€” Flood-Level Observation & Warning" width="220" />
+  <img src="public/assets/flow-wordmark.svg" alt="FLOW" width="240" />
 </p>
 
 <h1 align="center">Flood-Level Observation &amp; Warning</h1>
 
 <p align="center">
-  A public, map-first view of water-level observations, nearby alerts, and flood context in the Philippines.
+  Live water-level observations, flood-hazard context, and community help requests on one map.
 </p>
 
 <p align="center">
-  <a href="https://flow-startup.vercel.app/">Open FLOW</a> Â·
-  <a href="#how-flow-works">How it works</a> Â·
-  <a href="#run-locally">Run locally</a>
+  <a href="https://flow-startup.vercel.app/"><strong>Open FLOW</strong></a> &middot;
+  <a href="#features">Features</a> &middot;
+  <a href="#how-it-works">How it works</a> &middot;
+  <a href="#development">Development</a>
 </p>
 
 ---
 
-FLOW connects registered water-level monitoring points to a public map. Each device reports three fixed thresholds. The app turns those reports into a clear current status, shows when the last reading arrived, and alerts people near a point when its level rises. Modeled flood hazard and recorded evacuation sites add context to the map.
+FLOW is a public flood-observation web application focused on the Philippines. It connects water-level monitoring devices to an interactive map, helping people check nearby observations, review changes over time, explore recorded evacuation sites, and share requests for help.
 
-## What you can do
+The interface combines glass panels, standard and satellite maps, tilted building views, and status-colored water ripples. It adapts to desktop, tablet, and mobile screens and can be installed through supported browsers.
 
-| Feature | In FLOW |
+## Features
+
+| Feature | What it does |
 | --- | --- |
-| **See current observations** | Find monitoring points by name or area, filter by status, and open a point to see its last report, individual threshold states, and nearby points. |
-| **Get nearby alerts** | Receive an on-screen alert when a monitored level rises within 3 km. With permission and web push configured, alerts can arrive while the app is closed. |
-| **Explore the map** | Switch between standard and satellite views, adjust the camera, and show or hide modeled NOAH flood hazard for 5-year and 100-year scenarios. |
-| **Find recorded evacuation sites** | Browse mapped candidate sites in Metro Manila by name or city. The map also highlights a selected site's location. |
-| **Install FLOW** | Use the responsive web app on desktop or add it to a supported phone's home screen. |
+| **Live monitoring** | Displays each monitoring point's latest threshold status, individual probe states, reading time, and connection status. |
+| **Recent status graph** | Shows recorded sensor levels as a line graph with **24H**, **7D**, and **30D** views. |
+| **FLOW Intelligence** | Provides AI-assisted summaries of sensor conditions, with separate estimates from recorded observations for reaching Level 3 and receding below the first threshold when enough evidence is available. |
+| **Local weather outlook** | Uses the selected node's coordinates for weather conditions, rain probability, daily rainfall forecasts, hourly temperature, and a seven-day outlook. |
+| **Nearby alerts** | Shows alerts for rising sensor levels within **3 km**. Supported browsers can also receive closed-app push notifications after permission and subscription. |
+| **NOAH flood-hazard layers** | Displays modeled **5-year** and **100-year** flood scenarios alongside live observations, with visibility controls in Map layers & Settings. |
+| **Evacuation sites** | Shows recorded sites in Metro Manila and lets users inspect their mapped locations. |
+| **Directions inside FLOW** | Draws a walking route from the viewer's location to an evacuation site or a public help request. Google Maps is available as an additional option. |
+| **Community help requests** | Lets users publish an optional name, description, and location snapshot for others to see on the map. |
+| **Responsive map controls** | Supports search, zoom, wide and tilted views, standard and satellite layers, and mobile detail sheets. |
+| **Installable web app** | Provides an install flow, app icons, and an offline fallback page. |
 
-The **FLOW Intelligence** panel currently summarizes the latest sensor observation in plain language. The directions action opens the selected monitoring point in Google Maps; it does not calculate a flood-safe route. AI-assisted recommendations are a future project goal.
+## How it works
 
-## How FLOW works
+1. A registered monitoring device sends the states of its three water-level thresholds.
+2. FLOW validates the reading and updates the stored observation.
+3. The public map receives changes through Supabase Realtime, with refreshes to recover missed updates.
+4. Eligible rising levels trigger nearby alerts. Accepted status changes also request an updated intelligence summary.
+5. Users open a monitoring point to inspect its current state, recorded history, weather outlook, and available estimates.
 
-```mermaid
-flowchart LR
-    A["Three-threshold device"] --> B["Ingest API"]
-    B --> C["Supabase node state"]
-    C --> D["Public map"]
-    C --> E["Nearby alerts"]
-    F["NOAH hazard tiles"] --> D
-    G["Evacuation records"] --> D
-```
+### Reading the sensor status
 
-A registered device sends probe states with a unique message ID and its own token. The server validates the report and stores the latest state. The map refreshes when a node changes, with periodic refresh as a fallback. Background push is dispatched for eligible rising levels near saved alert areas.
+| Level | Status | Color | Meaning |
+| --- | --- | --- | --- |
+| **0** | Below first threshold | Gray | No water threshold has been reached. |
+| **1** | Flood Advisory | Blue | The first threshold has been reached. |
+| **2** | Flood Watch | Yellow | The second threshold has been reached. |
+| **3** | Flood Warning | Red | The third and highest sensor threshold has been reached. |
 
-| Level | Map status | Meaning |
-| --- | --- | --- |
-| `0` | Below threshold | None of the three probes has been reached. |
-| `1` | Advisory | First threshold reached. |
-| `2` | Watch | Second threshold reached. |
-| `3` | Warning | Third threshold reached. |
+Unexpected probe combinations show **Sensor fault**. Readings older than two minutes, missing readings, or a lost live connection show **Unavailable**.
 
-An invalid probe combination is marked **Sensor fault**. A reading older than two minutes, or a lost connection, is marked **Unavailable**. A below-threshold reading describes that monitoring point; it does not establish that nearby streets are dry.
+These are observations at individual monitoring points. The graph records threshold levels, not continuous water depth. History depends on the readings already recorded; missing periods are not reconstructed as measurements.
 
-### Map context and alerts
+## FLOW Intelligence and weather
 
-The colored **NOAH hazard layer** is a modeled rainfall scenario, separate from live sensor readings. FLOW serves bundled hazard tiles where available and can fall back to remote PMTiles archives. Coverage and detail vary across the Philippines; a colored area does not indicate flooding at the present moment.
+**FLOW Intelligence** follows changes in a node's sensor state and provides a short explanation of the current observation. Google Gemini supplies AI-assisted summaries when available; a sensor-based summary remains available as a fallback.
 
-**Evacuation sites** are recorded candidates, initially sourced from OpenStreetMap. Their opening status and route safety are not verified. Confirm arrangements and follow instructions from the relevant local disaster office.
+Timing estimates are calculated from recorded threshold transitions and relevant past events. They are shown as approximate ranges, with an explanation of their basis. When readings are stale or history is insufficient, FLOW shows that limitation instead of inventing a countdown. Level 3 is the highest sensor threshold, not a prediction of maximum flood depth.
 
-For **nearby alerts**, FLOW checks rising levels within 3 km of the user's permitted location. While the app is open, it can update the location and display alerts on screen. Closed-app web push uses the last approximate area saved while FLOW was open; users should update that area when they move.
+**Weather outlooks** come from Open-Meteo using each node's latitude and longitude. Moving a node changes the forecast location. The daily view rolls over at **12:01 AM Philippine time** and refreshes while the app is active and connected, or when it resumes. Rainfall values are forecasts, not rainfall measured by the monitoring device.
 
-## Run locally
+## Community help requests
 
-Use **Node.js 22**. A Supabase project with the FLOW schema must already be provisioned; this repository does not include a database migration to create it.
+Open the three-dot menu and choose **Report / Request help**. A user can add a name and description, obtain their location, and explicitly agree to publish those details.
+
+Published requests appear on the public map. Their compact popup includes **Name**, **Description**, expandable **Location details**, **Get Directions**, and **Open in Google Maps**. The reporting browser can also manage its own request.
+
+- Requests remain publicly visible for up to **six hours after publishing or updating**, or until the user removes them.
+- The shared position is a location snapshot with a reported accuracy, not continuous tracking.
+- Users should use the same browser to update or resolve their request. Clearing its saved data removes that control.
+- Reports are unverified community submissions. Publishing one does not contact emergency services or confirm that someone is responding.
+
+## Understanding the map
+
+**Live observations, modeled hazard, and community reports are separate information sources.** A sensor shows conditions at its own location. NOAH layers show modeled flood susceptibility for the selected scenario. A help marker shows a user's submitted request.
+
+Hazard coverage and detail depend on the available datasets. An uncolored area does not establish that it is flood-free, and a colored area does not establish that it is flooding now.
+
+Evacuation locations are recorded sites; FLOW does not confirm that a site is currently open or has capacity. Routes follow mapped paths and do not verify flood conditions, road passability, or safe access. Follow official local instructions when making evacuation decisions.
+
+### Location, alerts, and offline access
+
+FLOW uses permitted location access to center the map and identify nearby monitoring points. Closed-app alerts use the last approximate alert area saved while FLOW was open; they do not continuously track movement in the background.
+
+Notification delivery depends on browser support, permission, connectivity, and device settings. The service worker provides an offline fallback page, but fresh readings, routes, forecasts, community reports, and alerts require a network connection.
+
+## Built with
+
+| Layer | Technology |
+| --- | --- |
+| Application | Next.js, React, TypeScript |
+| Interactive map | MapLibre GL JS |
+| Data and live updates | Supabase and PostgreSQL |
+| Flood-hazard delivery | Bundled tiles and PMTiles archives |
+| Weather | Open-Meteo |
+| AI-assisted summaries | Google Gemini |
+| Notifications and installation | Web Push, service worker, web app manifest |
+| Hosting | Vercel |
+
+## Development
+
+Use **Node.js 22**. Connected features require an existing FLOW database and the project's service setup.
 
 ```sh
 npm ci
-cp .env.example .env.local
 npm run dev
 ```
 
-On Windows PowerShell, replace `cp` with `Copy-Item .env.example .env.local`. Set your values in `.env.local`, then visit [http://localhost:3000](http://localhost:3000). The app requires browser location access to enter the map. Keep `.env.local` out of version control.
+Open [localhost:3000](http://localhost:3000). Browser location permission is required to enter the map.
 
-### Environment variables
-
-| Variable | Use |
+| Command | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser-safe publishable key for public map reads. |
-| `SUPABASE_SECRET_KEY` | Server-only key for protected database operations. |
-| `FLOW_INSTALLER_SECRET` | Server-only secret of at least 32 characters for registering or rotating devices. |
-| `SITE_ORIGIN` | Deployed app origin for protected browser requests, for example `https://flow-startup.vercel.app`. |
-| `NEXT_PUBLIC_NOAH_5YR_PMTILES_URL`, `NEXT_PUBLIC_NOAH_100YR_PMTILES_URL` | Optional overrides for the remote hazard archives. |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web push keys and contact subject for closed-app alerts. Run `node scripts/generate-vapid.mjs` to generate a key pair. |
+| `npm run dev` | Start the local development server. |
+| `npm run typecheck` | Check TypeScript types. |
+| `npm test` | Run the project's automated checks. |
+| `npm run build` | Create a production build. |
+| `npm start` | Serve a production build. |
+| `npm run check` | Run type checking, tests, and a production build. |
 
-Only variables prefixed `NEXT_PUBLIC_` are exposed to the browser. Never put the installer secret, device token, Supabase server key, or VAPID private key in a public variable or commit.
+### Project structure
 
-### Database and device API
-
-The server expects these Supabase objects:
-
-- Tables: `public.flow_nodes`, `public.flow_evacuation_sites`, `public.flow_push_subscriptions`.
-- Functions: `public.flow_write_node`, `public.flow_accept_reading`, `public.flow_store_push_subscription`, `public.flow_claim_rising_alert`.
-
-| Route | Purpose |
+| Directory | Contents |
 | --- | --- |
-| `POST /api/register-node` | Create or update a monitoring point, or rotate its device token. Requires the installer secret. |
-| `POST /api/ingest-reading` | Accept a device's three probe states using its device token. |
-| `GET /api/evacuation-sites` | Load recorded sites for the map. |
-| `POST /api/alerts/subscription` | Save a permitted browser push subscription and approximate alert area. |
+| `app/` | Application pages, shared styles, and API routes. |
+| `components/flow/` | Map interface, node details, weather, charts, and help-report UI. |
+| `hooks/` | Live data, location, history, weather, intelligence, and routing state. |
+| `lib/` | Status rules, map styles, data handling, and server operations. |
+| `public/` | Branding, app assets, service worker, offline page, and bundled hazard tiles. |
+| `scripts/` | Project checks and development utilities. |
 
-The registration response returns the device token when a point is created or its token is rotated. Save it securely when issued. The device firmware is managed separately from this web repository.
+## Data and map credits
 
-To test an already registered point, set `FLOW_INGEST_URL`, `FLOW_DEVICE_ID`, and `FLOW_DEVICE_TOKEN` in your shell, then send a sample level:
+FLOW uses NOAH flood-hazard data (ODbL) through the BetterGov PH PMTiles archive, OpenStreetMap contributors' data and routing, OpenFreeMap map tiles, Esri satellite imagery and its contributors, and Open-Meteo forecasts. Interface icon paths are adapted from Lucide (ISC).
 
-```sh
-npm run send-reading -- 1
-```
-
-Use a number from `0` through `3`. The script does not register a device or create database tables.
-
-## Validate and deploy
-
-```sh
-npm run check
-```
-
-This runs the type check, project tests, and production build. Set the same required environment values in your deployment and connect it to the provisioned Supabase project. The installed app shows an offline page when navigation cannot connect; fresh sensor readings and alerts require a network connection.
-
-<sub>Map and data credits: NOAH flood hazard (ODbL); Â© OpenStreetMap contributors for initial evacuation site data and map labels; OpenFreeMap map tiles; Esri satellite imagery. Interface icon paths adapted from Lucide (ISC).</sub>
+FLOW brings these sources together with its own monitoring observations and community reports. It does not replace official warnings, emergency dispatch, or local disaster-response instructions.

@@ -30,8 +30,13 @@ export async function POST(req: Request) {
 
     if (data?.accepted === true) {
       after(async () => {
-        const { dispatchNearbyAlerts } = await import('@/lib/server/push');
-        await dispatchNearbyAlerts(body.device_id, body.message_id);
+        await Promise.allSettled([
+          import('@/lib/server/push').then(({ dispatchNearbyAlerts }) =>
+            dispatchNearbyAlerts(body.device_id, body.message_id)),
+          ...(data.changed === true && data.duplicate !== true
+            ? [import('@/lib/server/intelligence').then(({ getNodeIntelligence }) =>
+              getNodeIntelligence(body.device_id))] : []),
+        ]);
       });
     }
 

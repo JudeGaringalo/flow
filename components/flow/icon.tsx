@@ -2,6 +2,10 @@ import type { SVGProps } from 'react';
 
 
 const paths = {
+  'help-person': <>
+    <circle cx="12" cy="5" r="2.5" />
+    <path d="m4 8 5 4v8m11-12-5 4v8M9 12h6M9 20l3-4 3 4" />
+  </>,
   'sensor': <>
     <path d="M5 15.5c1.6-1.3 3.4-1.3 5 0s3.4 1.3 5 0 3.4-1.3 5 0" />
     <path d="M5 19c1.6-1.3 3.4-1.3 5 0s3.4 1.3 5 0 3.4-1.3 5 0" />

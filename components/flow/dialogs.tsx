@@ -8,15 +8,23 @@ import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
 import type { HazardScenario, HazardState } from './map-canvas';
 import { Icon } from './icon';
 import { AlertSettings } from './alert-settings';
+import { NodeWeatherPanel } from './node-weather-panel';
+import type { NodeWeatherState } from '@/hooks/use-node-weather';
 import type { MapHandle, ModalKind, StatusKey } from '@/lib/types';
+import type { HelpReportsState } from '@/hooks/use-help-reports';
+import { HelpReportPanel } from './help-report-panel';
 
 const TITLES: Record<ModalKind, string> = {
   menu: 'FLOW', layers: 'Map layers & Settings', about: 'About observations',
-  install: 'Install FLOW', directions: 'Open directions', alerts: 'Nearby alerts',
+  install: 'Install FLOW', directions: 'Evacuation directions', alerts: 'Nearby alerts',
   evacuation: 'Mapped evacuation sites',
+  weather: 'Weather outlook',
+  report: 'Report / Request help',
 };
 
 interface DialogProps {
+  helpReports: HelpReportsState;
+  weather: NodeWeatherState;
   mapRef: React.RefObject<MapHandle | null>;
   evacuationSites: MappedEvacuationSite[];
   showEvacuationSites: boolean;
@@ -42,7 +50,8 @@ export function Dialogs(props: DialogProps) {
   }, [f.modal]);
 
   return (
-    <dialog ref={dialog} aria-labelledby="dialog-title" onCancel={() => f.setModal(null)}
+    <dialog ref={dialog} className={f.modal === 'weather' ? 'weather-dialog' : undefined}
+      aria-labelledby="dialog-title" onCancel={() => f.setModal(null)}
       onClose={() => f.setModal(null)}
       onClick={event => {
         if (event.target !== event.currentTarget) return;
@@ -63,13 +72,20 @@ export function Dialogs(props: DialogProps) {
   );
 }
 
-function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
+function Content({ kind, weather, helpReports, mapRef, evacuationSites, showEvacuationSites,
   setShowEvacuationSites, showHazard, setShowHazard,
   hazardScenario, setHazardScenario, hazardState,
   siteState, onRetrySites, onSelectEvacuation }:
   DialogProps & { kind: ModalKind }) {
   const f = useFlow();
   if (kind === 'menu') return <Menu />;
+  if (kind === 'report') return <HelpReportPanel state={helpReports} onView={id => {
+    f.setModal(null);
+    requestAnimationFrame(() => mapRef.current?.focusHelpReport(id));
+  }} />;
+  if (kind === 'weather') return f.selected
+    ? <NodeWeatherPanel key={`${f.selected.id}:${f.selected.latitude}:${f.selected.longitude}`}
+      node={f.selected} weather={weather} /> : <p>Select a monitoring point to see its weather.</p>;
   if (kind === 'evacuation') return <EvacuationDirectory sites={evacuationSites}
     state={siteState} onRetry={onRetrySites} onSelect={onSelectEvacuation} />;
   if (kind === 'layers') return (
@@ -152,6 +168,12 @@ function Content({ kind, mapRef, evacuationSites, showEvacuationSites,
         a modeled rainfall scenario; it is separate from live observations.</p>
       <p className="map-data-credit">Streets and labels: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors.
         Satellite imagery: Esri and its imagery contributors.</p>
+      <p className="map-data-credit">Walking routes: <a href="https://routing.openstreetmap.de/about.html"
+        target="_blank" rel="noopener noreferrer">OSRM/FOSSGIS</a>, using © <a
+          href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">
+          OpenStreetMap contributors</a> · <a href="https://www.openstreetmap.org/fixthemap"
+          target="_blank" rel="noopener noreferrer">Fix the map</a>.
+        Your location and destination are sent to the routing service. Routes do not verify flooding or site opening.</p>
     </>
   );
 }
@@ -198,6 +220,9 @@ function Menu() {
   const installed = useInstalledApp();
   return (
     <div className="menu-list">
+      <button type="button" onClick={() => f.setModal('report')}>
+        <Icon name="help-person" />Report / Request help<Icon name="chevron" />
+      </button>
       {!installed && <button type="button" onClick={() => f.setModal('install')}>
         <Icon name="download" />Install FLOW<Icon name="chevron" />
       </button>}
@@ -214,23 +239,13 @@ function Note({ children }: { children: ReactNode }) {
 
 function Directions() {
   const f = useFlow();
-  const node = f.selected;
-  if (!node) return <p>Select a location first.</p>;
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${node.latitude},${node.longitude}&travelmode=driving`;
   return (
     <>
-      <p>Open Google Maps for <strong>{node.name}</strong>.</p>
-      <div className="route-note">
-        <strong>This is a monitoring point, not a safe destination.</strong><br />
-        FLOW does not verify road passability or share sensor readings with the routing provider.
-        Follow official closures and local advice.
-      </div>
-      <div className="dialog-actions">
-        <button className="secondary-btn" onClick={() => f.setModal(null)}>Stay on FLOW</button>
-        <a className="primary-btn" href={url} target="_blank" rel="noopener noreferrer">
-          Open Google Maps <Icon name="external" />
-        </a>
-      </div>
+      <p>Select an evacuation center on the map, then choose <strong>Get Directions</strong>
+        to draw a route from your current location.</p>
+      <button type="button" className="primary-btn" onClick={() => f.setModal('evacuation')}>
+        <Icon name="shelter" />Choose an evacuation center
+      </button>
     </>
   );
 }

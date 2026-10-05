@@ -93,7 +93,7 @@ try {
     if (error.code !== 'ENOENT') throw error;
   }
   try { await rename(stagePath, outputPath); } catch (error) {
-    try { await rename(backupPath, outputPath); } catch { /* Preserve the original error. */ }
+    try { await rename(backupPath, outputPath); } catch {  }
     throw error;
   }
   await writeFile(manifestPath, `${JSON.stringify({

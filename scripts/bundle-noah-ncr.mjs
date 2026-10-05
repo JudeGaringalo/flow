@@ -133,7 +133,7 @@ try {
       if (error.code !== 'ENOENT') throw error;
     }
     try { await rename(stagePath, outputPath); } catch (error) {
-      try { await rename(backupPath, outputPath); } catch { /* Keep original error. */ }
+      try { await rename(backupPath, outputPath); } catch {  }
       throw error;
     }
     const nextManifest = { ...manifest, ready: true, minzoom: minimum,

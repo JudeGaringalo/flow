@@ -1,4 +1,6 @@
 import type {
+  ExpressionSpecification,
+  FilterSpecification,
   LayerSpecification,
   StyleSpecification,
   SymbolLayerSpecification,
@@ -13,6 +15,17 @@ import type { Basemap } from './types';
 const VECTOR_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 const IMAGERY_TILES =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
+export const SATELLITE_OCEAN_COLOR = '#102c38';
+
+export const BUILDING_FILL_COLOR: ExpressionSpecification = [
+  'case', ['>=', ['to-number', ['get', 'render_height'], 0], 15],
+  '#3562b8', '#89b777',
+];
+export const BUILDING_OUTLINE_COLOR: ExpressionSpecification = [
+  'case', ['>=', ['to-number', ['get', 'render_height'], 0], 15],
+  '#244b94', '#537f47',
+];
 
 export const BASEMAPS: { id: Basemap; label: string; description: string }[] = [
   { id: 'standard', label: 'Standard', description: 'Streets and places' },
@@ -45,13 +58,18 @@ function styleLayer(
 
   if (layer.type === 'fill') {
     if (source === 'water') {
-      layer.paint = { ...layer.paint, 'fill-color': '#b7e5ed' };
+      layer.paint = { ...layer.paint,
+        'fill-color': satellite ? SATELLITE_OCEAN_COLOR : '#b7e5ed',
+        ...(satellite ? { 'fill-opacity': 1 } : {}),
+      };
+      if (satellite) layer.filter = ['all', ...(layer.filter ? [layer.filter] : []),
+        ['match', ['get', 'class'], ['ocean', 'sea'], true, false]] as FilterSpecification;
     } else if (source === 'building') {
       layer.paint = {
         ...layer.paint,
-        'fill-color': '#e9edef',
-        'fill-outline-color': '#dde4e8',
-        ...(satellite ? { 'fill-opacity': 0.88 } : {}),
+        'fill-color': BUILDING_FILL_COLOR,
+        'fill-outline-color': BUILDING_OUTLINE_COLOR,
+        'fill-opacity': 1,
       };
     } else if (source === 'landcover' || source === 'park') {
       layer.paint = {
@@ -65,6 +83,14 @@ function styleLayer(
         'fill-color': '#edf0e8',
       };
     }
+  }
+
+  if (layer.type === 'fill-extrusion' && source === 'building') {
+    layer.paint = {
+      ...layer.paint,
+      'fill-extrusion-color': BUILDING_FILL_COLOR,
+      'fill-extrusion-opacity': 1,
+    };
   }
 
   if (layer.type === 'line') {
@@ -88,12 +114,14 @@ function styleLayer(
   if (layer.type === 'symbol') {
     const label = layer as SymbolLayerSpecification;
     const isWater = source === 'water_name' || source === 'waterway';
-    const isPoi = source === 'poi';
+    if (source !== 'transportation_name' && label.layout) {
+      delete label.layout['icon-image'];
+    }
     label.paint = {
       ...label.paint,
       'text-color': satellite
         ? isWater ? '#9bd9ee' : '#f5f8fc'
-        : isWater ? '#419fba' : isPoi ? '#427b96' : '#596873',
+        : isWater ? '#419fba' : '#596873',
       'text-halo-color': satellite ? '#142735' : '#ffffff',
       'text-halo-width': satellite ? 1.6 : 1.4,
       'text-halo-blur': 0.4,
@@ -109,7 +137,11 @@ export function composeBasemap(
   mode: Basemap,
 ): StyleSpecification {
   const base = structuredClone(input);
-  const layers = base.layers.map((layer) => styleLayer(layer, mode));
+  const layers = base.layers
+    .filter(layer => layer.type !== 'symbol' ||
+      (sourceLayer(layer) !== 'poi' &&
+        (sourceLayer(layer) === 'transportation_name' || layer.layout?.['text-field'] !== undefined)))
+    .map(layer => styleLayer(layer, mode));
   const sources = { ...base.sources };
 
   if (mode === 'satellite') {
@@ -129,7 +161,9 @@ export function composeBasemap(
         { id: 'flow-imagery', type: 'raster', source: 'flow-imagery' },
         ...layers.filter((layer) =>
           layer.type === 'symbol' ||
-          (layer.type === 'fill' && sourceLayer(layer) === 'building') ||
+          (layer.type === 'fill' && sourceLayer(layer) === 'water') ||
+          ((layer.type === 'fill' || layer.type === 'fill-extrusion') &&
+            sourceLayer(layer) === 'building') ||
           (layer.type === 'line' &&
             ['transportation', 'boundary'].includes(sourceLayer(layer))),
         ),

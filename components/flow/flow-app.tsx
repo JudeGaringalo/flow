@@ -11,6 +11,8 @@ import { Icon } from './icon';
 import { MapCanvas, type HazardScenario, type HazardState } from './map-canvas';
 import { NodeDetails } from './node-details';
 import { Dialogs, PwaRegistration } from './dialogs';
+import { useNodeWeather } from '@/hooks/use-node-weather';
+import { useHelpReports } from '@/hooks/use-help-reports';
 
 export default function FlowApp() {
   ReactDOM.preconnect('https://tiles.openfreemap.org', { crossOrigin: 'anonymous' });
@@ -28,6 +30,8 @@ function Workspace() {
     mapRef = useRef<MapHandle | null>(null),
     searchRef = useRef<HTMLInputElement>(null),
     searchDock = useRef<HTMLDivElement>(null);
+  const weather = useNodeWeather(f.selected);
+  const helpReports = useHelpReports(f.ready && !!f.alertLocation);
   const [searchOpen, setSearchOpen] = useState(false);
   const [flatView, setFlatView] = useState(false);
   const [evacuationSites, setEvacuationSites] = useState<MappedEvacuationSite[]>([]);
@@ -210,6 +214,8 @@ function Workspace() {
           tabIndex={-1}
         >
           <MapCanvas ref={mapRef} onFlatViewChange={setFlatView}
+            helpReports={helpReports.reports} ownReportId={helpReports.ownId}
+            helpReportsLive={helpReports.live && !helpReports.error}
             evacuationSites={evacuationSites} showEvacuationSites={showEvacuationSites}
             showHazard={showHazard} hazardScenario={hazardScenario}
             onHazardStateChange={setHazardState} />
@@ -398,10 +404,10 @@ function Workspace() {
             </button>
           </div>
 
-          <NodeDetails />
+          <NodeDetails weather={weather} />
         </div>
       </main>
-      <Dialogs mapRef={mapRef} evacuationSites={evacuationSites}
+      <Dialogs weather={weather} helpReports={helpReports} mapRef={mapRef} evacuationSites={evacuationSites}
         showEvacuationSites={showEvacuationSites} setShowEvacuationSites={setShowEvacuationSites}
         showHazard={showHazard} setShowHazard={setShowHazard}
         hazardScenario={hazardScenario} setHazardScenario={setHazardScenario}

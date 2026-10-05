@@ -5,22 +5,27 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import type { ExpressionSpecification, FilterSpecification, GeoJSONSource, GeoJSONSourceSpecification, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup, StyleSpecification, VectorSourceSpecification } from 'maplibre-gl';
+import type { FilterSpecification, GeoJSONSource, GeoJSONSourceSpecification, LayerSpecification, Map as LibreMap, Marker as LibreMarker, Popup as LibrePopup, StyleSpecification, VectorSourceSpecification } from 'maplibre-gl';
 
 import { Icon } from './icon';
 import { useFlow } from '@/hooks/use-flow';
-import { loadBasemap } from '@/lib/map-styles';
+import { useEvacuationRoute, type EvacuationRouteState } from '@/hooks/use-evacuation-route';
+import { evacuationRouteData, routingLocation, type EvacuationRoute } from '@/lib/evacuation-routing';
+import { BUILDING_FILL_COLOR, BUILDING_OUTLINE_COLOR, SATELLITE_OCEAN_COLOR, loadBasemap } from '@/lib/map-styles';
+import { loadHazardTile, type HazardScenario } from '@/lib/hazard-tiles';
 import type { MappedEvacuationSite } from '@/lib/evacuation-sites';
 import hazardBundle from '@/lib/hazard-bundle.json';
 import hazardOverview from '@/lib/hazard-overview.json';
 import hazard100 from '@/lib/hazard-100.json';
 import neighboringCountries from '@/lib/neighboring-countries.json';
 import type { Basemap, MapHandle } from '@/lib/types';
+import type { HelpReport } from '@/lib/help-reports';
+import { ReportDetails } from './help-report-panel';
 
 interface MarkerHost {
   id: string;
@@ -85,7 +90,6 @@ const PHILIPPINE_PLACE_AREA = {
   ]],
 };
 
-const HEAT_SOURCE_ID = 'flow-sensor-heat';
 const HAZARD_SOURCE_ID = 'flow-noah-hazard';
 const HAZARD_LAYER_ID = 'flow-noah-hazard-fill';
 const HAZARD_BUILDING_MASK_ID = 'flow-noah-building-mask';
@@ -95,11 +99,12 @@ const EVAC_SOURCE_ID = 'flow-evacuation-sites';
 const EVAC_SITE_ID = 'flow-evacuation-points';
 const EVAC_ICON_ID = 'flow-evacuation-icon';
 const EVAC_ICON_LAYER_ID = 'flow-evacuation-icons';
-const EVAC_FOOTPRINT_SOURCE_ID = 'flow-evacuation-footprint';
-const EVAC_FOOTPRINT_FILL_ID = 'flow-evacuation-footprint-fill';
-const EVAC_FOOTPRINT_3D_ID = 'flow-evacuation-footprint-3d';
 const BUILDINGS_3D_ID = 'flow-buildings-3d';
 const BUILDINGS_3D_MIN_ZOOM = 12;
+const ROUTE_SOURCE_ID = 'flow-evacuation-route';
+const ROUTE_HALO_ID = 'flow-evacuation-route-halo';
+const ROUTE_LINE_ID = 'flow-evacuation-route-line';
+const ROUTE_POINTS_ID = 'flow-evacuation-route-points';
 const CITY_PITCH = 60;
 const CITY_BEARING = -17;
 const FOCUS_ZOOM = 17;
@@ -128,90 +133,22 @@ function returnViewAt(instance: LibreMap, center: [number, number]): CameraView 
   };
 }
 
-export type HazardScenario = '5yr' | '100yr';
-const HAZARD_ARCHIVES: Record<HazardScenario, string> = {
-  '5yr': process.env.NEXT_PUBLIC_NOAH_5YR_PMTILES_URL?.trim()
-    || 'https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/layers/flood_5yr.pmtiles',
-  '100yr': process.env.NEXT_PUBLIC_NOAH_100YR_PMTILES_URL?.trim()
-    || 'https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/layers/flood_100yr.pmtiles',
-};
-const LOCAL_HAZARD = hazardBundle.ready;
-const LOCAL_OVERVIEW = hazardOverview.ready;
-const LOCAL_100 = hazard100.ready;
+export type { HazardScenario } from '@/lib/hazard-tiles';
 let hazardProtocolRegistered = false;
-const hazardArchives: Partial<Record<HazardScenario, import('pmtiles').PMTiles>> = {};
-let hazardProtocolPromise: Promise<void> | null = null;
 
 export type HazardState = 'off' | 'loading' | 'ready' | 'empty' | 'zoom' | 'unavailable';
 
-function tileIntersectsBounds(z: number, x: number, y: number,
-  bounds: readonly number[]) {
-  const [west, south, east, north] = bounds;
-  const count = 2 ** z;
-  const xAt = (longitude: number) => Math.max(0, Math.min(count - 1,
-    Math.floor((longitude + 180) / 360 * count)));
-  const yAt = (latitude: number) => Math.max(0, Math.min(count - 1,
-    Math.floor((1 - Math.asinh(Math.tan(latitude * Math.PI / 180)) / Math.PI) / 2 * count)));
-  return x >= xAt(west) && x <= xAt(east) &&
-    y >= yAt(north) && y <= yAt(south);
-}
-
-function tileInLocalBundle(z: number, x: number, y: number) {
-  return LOCAL_HAZARD && z >= hazardBundle.minzoom && z <= hazardBundle.maxzoom &&
-    tileIntersectsBounds(z, x, y, hazardBundle.bounds);
-}
-
-function tileInLocal100(z: number, x: number, y: number) {
-  return LOCAL_100 && z <= hazard100.maxzoom &&
-    tileIntersectsBounds(z, x, y,
-      z <= hazard100.overviewMaxzoom ? hazard100.overviewBounds : hazard100.detailBounds);
-}
-
-function prepareHazardProtocol(lib: typeof import('maplibre-gl')) {
-  if (!hazardProtocolPromise) {
-    hazardProtocolPromise = import('pmtiles').then(pmtiles => {
-      if (!hazardProtocolRegistered) {
-        lib.addProtocol('flowhazard', async (params, abortController) => {
-          const match = /^flowhazard:\/\/noah\/(5yr|100yr)\/(\d+)\/(\d+)\/(\d+)\.pbf$/.exec(params.url);
-          if (!match) throw new Error('Invalid FLOW hazard tile URL');
-          const scenario = match[1] as HazardScenario;
-          const [z, x, y] = match.slice(2).map(Number);
-          if (scenario === '100yr' && tileInLocal100(z, x, y)) {
-            const local = await fetch(
-              `/hazard/${hazard100.version}/${z}/${x}/${y}.pbf.gz`,
-              { signal: abortController.signal },
-            );
-            if (local.ok) return { data: new Uint8Array(await local.arrayBuffer()) };
-          }
-          if (scenario === '5yr' && LOCAL_OVERVIEW && z <= hazardOverview.maxzoom &&
-              tileIntersectsBounds(z, x, y, hazardOverview.bounds)) {
-            const overview = await fetch(
-              `/hazard/${hazardOverview.version}/${z}/${x}/${y}.pbf.gz`,
-              { signal: abortController.signal },
-            );
-            if (overview.ok) return { data: new Uint8Array(await overview.arrayBuffer()) };
-          }
-          if (scenario === '5yr' && tileInLocalBundle(z, x, y)) {
-            const local = await fetch(
-              `/hazard/${hazardBundle.version}/${z}/${x}/${y}.pbf`,
-              { signal: abortController.signal },
-            );
-            if (local.ok) return { data: new Uint8Array(await local.arrayBuffer()) };
-          }
-          const archive = hazardArchives[scenario] ??
-            (hazardArchives[scenario] = new pmtiles.PMTiles(HAZARD_ARCHIVES[scenario]));
-          const tile = await archive.getZxy(z, x, y, abortController.signal);
-          abortController.signal.throwIfAborted();
-          return { data: tile ? new Uint8Array(tile.data) : new Uint8Array() };
-        });
-        hazardProtocolRegistered = true;
-      }
-    }).catch(error => {
-      hazardProtocolPromise = null;
-      throw error;
-    });
-  }
-  return hazardProtocolPromise;
+async function prepareHazardProtocol(lib: typeof import('maplibre-gl')) {
+  if (hazardProtocolRegistered) return;
+  lib.addProtocol('flowhazard', async (params, abortController) => {
+    const match = /^flowhazard:\/\/noah\/(5yr|100yr)\/(\d+)\/(\d+)\/(\d+)\.pbf$/.exec(params.url);
+    if (!match) throw new Error('Invalid FLOW hazard tile URL');
+    const scenario = match[1] as HazardScenario;
+    const [z, x, y] = match.slice(2).map(Number);
+    const data = await loadHazardTile(scenario, z, x, y, abortController.signal);
+    return { data: data.buffer as ArrayBuffer, cacheControl: 'public, max-age=86400' };
+  });
+  hazardProtocolRegistered = true;
 }
 
 function addNeighborMask(instance: LibreMap, satellite: boolean) {
@@ -224,10 +161,10 @@ function addNeighborMask(instance: LibreMap, satellite: boolean) {
     id: NEIGHBORS_MASK_ID,
     type: 'fill',
     source: NEIGHBORS_SOURCE_ID,
-    paint: { 'fill-color': satellite ? '#102c38' : '#b7e5ed', 'fill-opacity': 1 },
+    paint: { 'fill-color': satellite ? SATELLITE_OCEAN_COLOR : '#b7e5ed', 'fill-opacity': 1 },
   });
   else instance.setPaintProperty(NEIGHBORS_MASK_ID, 'fill-color',
-    satellite ? '#102c38' : '#b7e5ed');
+    satellite ? SATELLITE_OCEAN_COLOR : '#b7e5ed');
 }
 
 function hazardSource(scenario: HazardScenario): VectorSourceSpecification {
@@ -258,9 +195,85 @@ function hazardLayer(visible: boolean, scenario: HazardScenario): LayerSpecifica
 
 function hazardBeforeId(layers: LayerSpecification[]) {
   return layers.find(layer =>
-    (layer.type === 'fill' || layer.type === 'fill-extrusion') &&
-    'source-layer' in layer && layer['source-layer'] === 'building')?.id
+    layer.id === HAZARD_BUILDING_MASK_ID || layer.id === BUILDINGS_3D_ID ||
+    ('source-layer' in layer &&
+      ((layer.type === 'fill' || layer.type === 'fill-extrusion') &&
+        layer['source-layer'] === 'building' ||
+       layer.type === 'line' && layer['source-layer'] === 'transportation')))?.id
     ?? layers.find(layer => layer.type === 'symbol')?.id;
+}
+
+function restoreHazardOrder(instance: LibreMap) {
+  if (!instance.getLayer(HAZARD_LAYER_ID)) return;
+  const layers = instance.getStyle().layers;
+  const beforeId = hazardBeforeId(layers);
+  if (!beforeId) return;
+  const hazardIndex = layers.findIndex(layer => layer.id === HAZARD_LAYER_ID);
+  const beforeIndex = layers.findIndex(layer => layer.id === beforeId);
+  if (hazardIndex !== beforeIndex - 1) instance.moveLayer(HAZARD_LAYER_ID, beforeId);
+}
+
+function preserveFlowLayers(previous: StyleSpecification | undefined,
+  next: StyleSpecification): StyleSpecification {
+  if (!previous) return next;
+  const runtimeIds = new Set([
+    HAZARD_BUILDING_MASK_ID, BUILDINGS_3D_ID, EVAC_SITE_ID, EVAC_ICON_LAYER_ID,
+    ROUTE_HALO_ID, ROUTE_LINE_ID, ROUTE_POINTS_ID,
+  ]);
+  const layersById = new Map(next.layers.map(layer => [layer.id, layer]));
+  const visibility = next.layers.find(layer => layer.id === HAZARD_LAYER_ID)
+    ?.layout?.visibility ?? 'none';
+  for (const original of previous.layers) {
+    if (!runtimeIds.has(original.id) && !(original.type === 'fill-extrusion' &&
+        'source-layer' in original && original['source-layer'] === 'building')) continue;
+    const layer = structuredClone(original);
+    if (layer.id === HAZARD_BUILDING_MASK_ID && layer.type === 'fill') {
+      layer.layout = { ...layer.layout, visibility };
+      layer.paint = { ...layer.paint, 'fill-opacity': 1,
+        'fill-color': BUILDING_FILL_COLOR,
+        'fill-outline-color': BUILDING_OUTLINE_COLOR };
+    }
+    if (layer.type === 'fill-extrusion' && 'source-layer' in layer &&
+        layer['source-layer'] === 'building') {
+      layer.paint = { ...layer.paint,
+        'fill-extrusion-color': BUILDING_FILL_COLOR,
+        'fill-extrusion-opacity': 1 };
+    }
+    layersById.set(layer.id, layer);
+  }
+  const layers: LayerSpecification[] = [];
+  for (const layer of previous.layers) {
+    const replacement = layersById.get(layer.id);
+    if (!replacement) continue;
+    layers.push(replacement);
+    layersById.delete(layer.id);
+  }
+  for (const layer of layersById.values()) {
+    let beforeId: string | undefined;
+    if (layer.type === 'background' || layer.type === 'raster') beforeId = layers[0]?.id;
+    else if (layer.id === HAZARD_LAYER_ID) beforeId = hazardBeforeId(layers);
+    else if (layer.type === 'symbol' || layer.id === EVAC_SITE_ID)
+      beforeId = layers.find(item => item.id === NEIGHBORS_MASK_ID)?.id;
+    else if (layer.id !== NEIGHBORS_MASK_ID) {
+      const anchorId = layers.find(item => item.id === HAZARD_LAYER_ID)?.id
+        ?? hazardBeforeId(layers);
+      const anchorIndex = layers.findIndex(item => item.id === anchorId);
+      const nextIndex = next.layers.findIndex(item => item.id === layer.id);
+      beforeId = next.layers.slice(nextIndex + 1).find(item => {
+        const index = layers.findIndex(existing => existing.id === item.id);
+        return index >= 0 && index < anchorIndex;
+      })?.id ?? anchorId;
+    }
+    const index = beforeId ? layers.findIndex(item => item.id === beforeId) : layers.length;
+    layers.splice(index, 0, layer);
+  }
+  const sources = { ...next.sources };
+  for (const layer of layers) {
+    if ('source' in layer && typeof layer.source === 'string' &&
+        !sources[layer.source] && previous.sources[layer.source])
+      sources[layer.source] = previous.sources[layer.source];
+  }
+  return { ...next, sources, layers };
 }
 
 function withLocalHazard(style: StyleSpecification, visible: boolean,
@@ -292,7 +305,7 @@ function withLocalHazard(style: StyleSpecification, visible: boolean,
     id: NEIGHBORS_MASK_ID,
     type: 'fill',
     source: NEIGHBORS_SOURCE_ID,
-    paint: { 'fill-color': satellite ? '#102c38' : '#b7e5ed', 'fill-opacity': 1 },
+    paint: { 'fill-color': satellite ? SATELLITE_OCEAN_COLOR : '#b7e5ed', 'fill-opacity': 1 },
   });
   return {
     ...style,
@@ -306,10 +319,10 @@ function addHazardLayer(instance: LibreMap, visible: boolean, scenario: HazardSc
     instance.addSource(HAZARD_SOURCE_ID, hazardSource(scenario));
   if (!instance.getLayer(HAZARD_LAYER_ID))
     instance.addLayer(hazardLayer(visible, scenario), hazardBeforeId(instance.getStyle().layers));
+  restoreHazardOrder(instance);
 }
 
-function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolean,
-  heatVisible = !hazardVisible) {
+function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolean) {
   if (instance.getLayer(HAZARD_LAYER_ID)) {
     const visibility = hazardVisible ? 'visible' : 'none';
     if (instance.getLayoutProperty(HAZARD_LAYER_ID, 'visibility') !== visibility)
@@ -320,111 +333,22 @@ function setObservationLayerVisibility(instance: LibreMap, hazardVisible: boolea
     if (instance.getLayoutProperty(HAZARD_BUILDING_MASK_ID, 'visibility') !== visibility)
       instance.setLayoutProperty(HAZARD_BUILDING_MASK_ID, 'visibility', visibility);
   }
-  for (const level of [1, 2, 3]) {
-    const id = `flow-sensor-heat-${level}`;
-    if (instance.getLayer(id)) {
-      const visibility = heatVisible ? 'visible' : 'none';
-      if (instance.getLayoutProperty(id, 'visibility') !== visibility)
-        instance.setLayoutProperty(id, 'visibility', visibility);
-    }
-  }
 }
 
-function heatPalette(red: number, green: number, blue: number): ExpressionSpecification {
-  const color = (alpha: number) => `rgba(${red},${green},${blue},${alpha})`;
-  return ['interpolate', ['linear'], ['heatmap-density'],
-    0, color(0), .04, color(.02), .1, color(.08), .18, color(.19),
-    .28, color(.37), .42, color(.56), .65, color(.77), 1, color(.92)];
-}
-
-const BLUE = (alpha: number) => `rgba(20,127,200,${alpha})`;
-const YELLOW = (alpha: number) => `rgba(255,202,36,${alpha})`;
-const RED = (alpha: number) => `rgba(217,47,56,${alpha})`;
-
-
-
-const WATCH_HEAT: ExpressionSpecification = ['interpolate', ['linear'], ['heatmap-density'],
-  0, BLUE(0), .04, BLUE(.02), .1, BLUE(.08), .18, BLUE(.19),
-  .28, BLUE(.37), .33, BLUE(.45),
-  .41, 'rgba(155,159,169,0.55)', .49, 'rgba(194,183,170,0.61)',
-  .58, YELLOW(.76), .7, YELLOW(.86), 1, YELLOW(.96)];
-
-const WARNING_HEAT: ExpressionSpecification = ['interpolate', ['linear'], ['heatmap-density'],
-  0, BLUE(0), .04, BLUE(.02), .1, BLUE(.08), .18, BLUE(.19),
-  .28, BLUE(.37), .33, BLUE(.45),
-  .41, 'rgba(155,159,169,0.55)', .49, 'rgba(194,183,170,0.61)',
-  .58, YELLOW(.76), .67, YELLOW(.82),
-  .74, 'rgba(219,150,143,0.8)', .84, RED(.92), 1, RED(.96)];
-
-function heatData(flow: ReturnType<typeof useFlow>) {
-  return {
-    type: 'FeatureCollection' as const,
-    features: flow.visibleNodes.flatMap((node) => {
-      const level = flow.getStatus(node).level;
-      if (!level || !Number.isFinite(node.latitude) || !Number.isFinite(node.longitude)) return [];
-      return [{
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [node.longitude, node.latitude] },
-        properties: { level },
-      }];
-    }),
-  };
-}
-
-
-function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
-  if (!instance.getSource(HEAT_SOURCE_ID)) {
-    instance.addSource(HEAT_SOURCE_ID, { type: 'geojson', data: heatData(flow) });
-  }
-
+function addBuildingLayers(instance: LibreMap) {
   const layers = instance.getStyle().layers;
   const beforeId = layers.find((layer) => layer.type === 'symbol')?.id;
-  const roads = layers.filter((layer) => layer.type === 'line' &&
-    'source-layer' in layer && layer['source-layer'] === 'transportation');
   const buildings = layers.filter((layer) => layer.type === 'fill' &&
     'source-layer' in layer && layer['source-layer'] === 'building');
   const buildingExtrusions = layers.filter((layer) => layer.type === 'fill-extrusion' &&
     layer.id !== BUILDINGS_3D_ID && 'source-layer' in layer &&
     layer['source-layer'] === 'building');
-  const satellite = flow.basemap === 'satellite';
-  const palettes: [number, ExpressionSpecification][] = [
-    [1, heatPalette(20, 127, 200)],
-    [2, WATCH_HEAT],
-    [3, WARNING_HEAT],
-  ];
-
-  for (const [level, color] of palettes) {
-    const id = `flow-sensor-heat-${level}`;
-    const opacity: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'],
-      10.5, 0, 11.5, satellite ? 0.75 : 0.85,
-      12.5, satellite ? 0.85 : 0.95];
-    if (instance.getLayer(id)) {
-      instance.setPaintProperty(id, 'heatmap-opacity', opacity);
-      instance.moveLayer(id, beforeId);
-      continue;
-    }
-    const layer: LayerSpecification = {
-      id,
-      type: 'heatmap',
-      source: HEAT_SOURCE_ID,
-      filter: ['==', ['get', 'level'], level],
-      paint: {
-        'heatmap-weight': 1,
-
-        'heatmap-intensity': 2.3,
-        'heatmap-color': color,
-        'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-          10.5, 1, 11, 82, 12, 168, 13, 230, 14, 245],
-        'heatmap-opacity': opacity,
-      },
-    };
-    instance.addLayer(layer, beforeId);
+  for (const building of buildings) {
+    instance.setPaintProperty(building.id, 'fill-color', BUILDING_FILL_COLOR);
+    instance.setPaintProperty(building.id, 'fill-outline-color', BUILDING_OUTLINE_COLOR);
+    instance.setPaintProperty(building.id, 'fill-opacity', 1);
+    instance.moveLayer(building.id, beforeId);
   }
-
-
-  for (const road of roads) instance.moveLayer(road.id, 'flow-sensor-heat-1');
-
-  for (const building of buildings) instance.moveLayer(building.id, beforeId);
 
   const buildingSource = [...buildings, ...buildingExtrusions].find((layer) =>
     'source' in layer && typeof layer.source === 'string');
@@ -437,31 +361,27 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
       minzoom: 12,
       layout: { visibility: 'none' },
       paint: {
-        'fill-color': satellite ? '#aeb2bb' : '#e9edef',
-        'fill-outline-color': satellite ? '#87939d' : '#dde4e8',
+        'fill-color': BUILDING_FILL_COLOR,
+        'fill-outline-color': BUILDING_OUTLINE_COLOR,
         'fill-opacity': 1,
       },
     }, beforeId);
     else {
       instance.setPaintProperty(HAZARD_BUILDING_MASK_ID, 'fill-color',
-        satellite ? '#aeb2bb' : '#e9edef');
+        BUILDING_FILL_COLOR);
       instance.setPaintProperty(HAZARD_BUILDING_MASK_ID, 'fill-outline-color',
-        satellite ? '#87939d' : '#dde4e8');
+        BUILDING_OUTLINE_COLOR);
       instance.moveLayer(HAZARD_BUILDING_MASK_ID, beforeId);
     }
   }
 
 
-  const color: ExpressionSpecification = ['interpolate', ['linear'],
-    ['to-number', ['get', 'render_height'], 0],
-    0, '#aeb2bb', 8, '#9aa4b6', 16, '#7895c8',
-    30, '#547bc7', 70, '#3562b8'];
   const opacity = 1;
   if (buildingExtrusions.length) {
     if (instance.getLayer(BUILDINGS_3D_ID)) instance.removeLayer(BUILDINGS_3D_ID);
     for (const extrusion of buildingExtrusions) {
       instance.setLayerZoomRange(extrusion.id, BUILDINGS_3D_MIN_ZOOM, 24);
-      instance.setPaintProperty(extrusion.id, 'fill-extrusion-color', color);
+      instance.setPaintProperty(extrusion.id, 'fill-extrusion-color', BUILDING_FILL_COLOR);
       instance.setPaintProperty(extrusion.id, 'fill-extrusion-opacity', opacity);
       instance.setPaintProperty(extrusion.id, 'fill-extrusion-height',
         ['to-number', ['get', 'render_height'], 0]);
@@ -471,7 +391,7 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
     const building = buildings.find((layer) => 'source' in layer && typeof layer.source === 'string');
     if (building && 'source' in building && typeof building.source === 'string') {
       if (instance.getLayer(BUILDINGS_3D_ID)) {
-        instance.setPaintProperty(BUILDINGS_3D_ID, 'fill-extrusion-color', color);
+        instance.setPaintProperty(BUILDINGS_3D_ID, 'fill-extrusion-color', BUILDING_FILL_COLOR);
         instance.setPaintProperty(BUILDINGS_3D_ID, 'fill-extrusion-opacity', opacity);
         instance.moveLayer(BUILDINGS_3D_ID, beforeId);
       } else {
@@ -483,7 +403,7 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
           minzoom: BUILDINGS_3D_MIN_ZOOM,
           filter: ['!=', ['get', 'hide_3d'], true],
           paint: {
-            'fill-extrusion-color': color,
+            'fill-extrusion-color': BUILDING_FILL_COLOR,
             'fill-extrusion-opacity': opacity,
             'fill-extrusion-height': ['to-number', ['get', 'render_height'], 0],
             'fill-extrusion-base': ['to-number', ['get', 'render_min_height'], 0],
@@ -492,6 +412,7 @@ function addHeatLayers(instance: LibreMap, flow: ReturnType<typeof useFlow>) {
       }
     }
   }
+  restoreHazardOrder(instance);
 }
 
 function evacuationData(sites: MappedEvacuationSite[]) {
@@ -503,10 +424,6 @@ function evacuationData(sites: MappedEvacuationSite[]) {
       properties: { id: site.id },
     })),
   };
-}
-
-function emptyFootprint() {
-  return { type: 'FeatureCollection' as const, features: [] };
 }
 
 function addEvacuationLayers(instance: LibreMap, sites: MappedEvacuationSite[],
@@ -544,36 +461,80 @@ function addEvacuationLayers(instance: LibreMap, sites: MappedEvacuationSite[],
   if (instance.getLayer(EVAC_ICON_LAYER_ID))
     instance.setLayoutProperty(EVAC_ICON_LAYER_ID, 'visibility', layout.visibility);
 
-  if (!instance.getSource(EVAC_FOOTPRINT_SOURCE_ID)) {
-    instance.addSource(EVAC_FOOTPRINT_SOURCE_ID, { type: 'geojson', data: emptyFootprint() });
-  }
-  const beforeId = instance.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
-  if (!instance.getLayer(EVAC_FOOTPRINT_FILL_ID)) instance.addLayer({
-    id: EVAC_FOOTPRINT_FILL_ID, type: 'fill', source: EVAC_FOOTPRINT_SOURCE_ID,
-    minzoom: 13,
-    paint: { 'fill-color': '#088b99', 'fill-opacity': 0.78,
-      'fill-outline-color': '#e2ffff' },
-  }, beforeId);
-  if (!instance.getLayer(EVAC_FOOTPRINT_3D_ID)) instance.addLayer({
-    id: EVAC_FOOTPRINT_3D_ID, type: 'fill-extrusion', source: EVAC_FOOTPRINT_SOURCE_ID,
-    minzoom: 14,
-    paint: { 'fill-extrusion-color': '#087b89', 'fill-extrusion-opacity': 0.92,
-      'fill-extrusion-height': ['to-number', ['get', 'height'], 0],
-      'fill-extrusion-base': ['to-number', ['get', 'base'], 0] },
-  }, beforeId);
+  restoreHazardOrder(instance);
 }
 
 
+function addEvacuationRouteLayers(instance: LibreMap, route: EvacuationRoute | null) {
+  const ids = [ROUTE_HALO_ID, ROUTE_LINE_ID, ROUTE_POINTS_ID];
+  if (!route) {
+    for (const id of [...ids].reverse()) if (instance.getLayer(id)) instance.removeLayer(id);
+    if (instance.getSource(ROUTE_SOURCE_ID)) instance.removeSource(ROUTE_SOURCE_ID);
+    return;
+  }
+  const source = instance.getSource(ROUTE_SOURCE_ID) as GeoJSONSource | undefined;
+  const data = evacuationRouteData(route);
+  if (source) void source.setData(data);
+  else instance.addSource(ROUTE_SOURCE_ID, { type: 'geojson', data,
+    attribution: 'Routing: <a href="https://routing.openstreetmap.de/about.html">OSRM/FOSSGIS</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+  });
+  const beforeId = instance.getStyle().layers.find(layer => layer.type === 'symbol')?.id;
+  const routeLayers: LayerSpecification[] = [
+    { id: ROUTE_HALO_ID, type: 'line', source: ROUTE_SOURCE_ID,
+      filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#ffffff', 'line-opacity': .95,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 8, 18, 10] } },
+    { id: ROUTE_LINE_ID, type: 'line', source: ROUTE_SOURCE_ID,
+      filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#0875ce',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 4, 18, 6] } },
+    { id: ROUTE_POINTS_ID, type: 'circle', source: ROUTE_SOURCE_ID,
+      filter: ['==', ['geometry-type'], 'Point'],
+      paint: { 'circle-radius': 6, 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff',
+        'circle-color': ['case', ['==', ['get', 'kind'], 'destination'],
+          ['case', ['==', ['get', 'destinationKind'], 'help-report'], '#b32335', '#075e70'], '#0875ce'] } },
+  ];
+  for (const layer of routeLayers) {
+    if (!instance.getLayer(layer.id)) instance.addLayer(layer, beforeId);
+    else instance.moveLayer(layer.id, beforeId);
+  }
+}
+
+function updateDirectionsButton(button: HTMLButtonElement | null,
+  state: EvacuationRouteState, siteId: string | null) {
+  if (!button) return;
+  const status = state.site?.id === siteId ? state.status : 'idle';
+  const busy = status === 'locating' || status === 'loading';
+  button.disabled = busy;
+  button.setAttribute('aria-busy', String(busy));
+  button.textContent = status === 'locating' ? 'Finding location…'
+    : status === 'loading' ? 'Finding route…' : 'Get Directions';
+}
+
 export const MapCanvas = forwardRef<MapHandle, {
   onFlatViewChange: (flat: boolean) => void;
+  helpReports: HelpReport[];
+  ownReportId: string | null;
+  helpReportsLive: boolean;
   evacuationSites: MappedEvacuationSite[];
   showEvacuationSites: boolean;
   showHazard: boolean;
   hazardScenario: HazardScenario;
   onHazardStateChange: (state: HazardState) => void;
-}>(function MapCanvas({ onFlatViewChange, evacuationSites, showEvacuationSites,
+}>(function MapCanvas({ onFlatViewChange, helpReports, ownReportId, helpReportsLive, evacuationSites, showEvacuationSites,
   showHazard, hazardScenario, onHazardStateChange }, ref) {
   const flow = useFlow();
+  const helpReportsRef = useRef(helpReports);
+  helpReportsRef.current = helpReports;
+  const evacuationRoute = useEvacuationRoute(flow.alertLocation);
+  const routeData = useRef(evacuationRoute.data);
+  routeData.current = evacuationRoute.data;
+  const routeState = useRef(evacuationRoute);
+  routeState.current = evacuationRoute;
+  const directionsButton = useRef<HTMLButtonElement | null>(null);
+  const beginDirections = useRef<(site: MappedEvacuationSite) => void>(() => {});
   const latest = useRef(flow);
   latest.current = flow;
   const flatViewChange = useRef(onFlatViewChange);
@@ -592,16 +553,20 @@ export const MapCanvas = forwardRef<MapHandle, {
   const hazardArchiveReady = useRef(false);
   const hazardArchiveFailed = useRef(false);
   const hazardHadDataInView = useRef(false);
-  const lastHeatSnapshot = useRef('');
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<LibreMap | null>(null);
   const library = useRef<typeof import('maplibre-gl') | null>(null);
   const markers = useRef(new Map<string, LibreMarker>());
+  const helpMarkers = useRef(new Map<string, LibreMarker>());
+  const helpPopup = useRef<LibrePopup | null>(null);
+  const selectedHelpId = useRef<string | null>(null);
+  const helpReturnView = useRef<CameraView | null>(null);
+  const [helpHosts, setHelpHosts] = useState<MarkerHost[]>([]);
+  const [helpPopupHost, setHelpPopupHost] = useState<MarkerHost | null>(null);
   const userMarker = useRef<LibreMarker | null>(null);
   const sitePopup = useRef<LibrePopup | null>(null);
   const selectedEvacuationId = useRef<string | null>(null);
-  const selectedFootprintKey = useRef('');
   const evacuationIcon = useRef<HTMLImageElement | null>(null);
   const [hosts, setHosts] = useState<MarkerHost[]>([]);
   const [zoomTier, setZoomTier] = useState<'wide' | 'regional' | 'city'>('city');
@@ -621,10 +586,10 @@ export const MapCanvas = forwardRef<MapHandle, {
     if (!hazardVisibleRef.current || !instance.getSource(HAZARD_SOURCE_ID)) return;
     if (!hazardArchiveReady.current || !instance.isSourceLoaded(HAZARD_SOURCE_ID)) {
       if (hazardArchiveFailed.current) {
-        setObservationLayerVisibility(instance, true, true);
+        setObservationLayerVisibility(instance, true);
         hazardStateChange.current('unavailable');
       } else if (!hazardHadDataInView.current) {
-        setObservationLayerVisibility(instance, true, true);
+        setObservationLayerVisibility(instance, true);
         hazardStateChange.current('loading');
       }
       return;
@@ -638,18 +603,93 @@ export const MapCanvas = forwardRef<MapHandle, {
       return;
     }
     hazardHadDataInView.current = false;
-    setObservationLayerVisibility(instance, true, true);
+    setObservationLayerVisibility(instance, true);
     hazardStateChange.current(hazardArchiveFailed.current ? 'unavailable' : 'empty');
   }, []);
 
-  const dismissEvacuation = useCallback((instance: LibreMap) => {
+  const dismissEvacuation = useCallback(() => {
     selectedEvacuationId.current = null;
     evacuationReturnView.current = null;
     sitePopup.current?.remove();
     sitePopup.current = null;
-    selectedFootprintKey.current = '';
-    const footprint = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
-    if (footprint) void footprint.setData(emptyFootprint());
+    directionsButton.current = null;
+  }, []);
+
+  const dismissHelp = useCallback(() => {
+    const popup = helpPopup.current;
+    helpPopup.current = null;
+    selectedHelpId.current = null;
+    helpReturnView.current = null;
+    popup?.remove();
+    setHelpPopupHost(null);
+  }, []);
+
+  const focusHelpReport = useCallback((id: string) => {
+    const instance = map.current;
+    const lib = library.current;
+    const report = helpReportsRef.current.find(item => item.id === id);
+    if (!instance || !lib || !report || Date.parse(report.expires_at) <= Date.now()) return;
+    dismissHelp();
+    dismissEvacuation();
+    nodeReturnView.current = null;
+    latest.current.closeDetails();
+    restorePitchAfterZoomOut.current = false;
+    viewTransitioning.current = null;
+    const target: [number, number] = [report.longitude, report.latitude];
+    helpReturnView.current = returnViewAt(instance, target);
+    const element = document.createElement('div');
+    const popup = new lib.Popup({ offset: 30, maxWidth: '290px', closeOnClick: true,
+      className: 'flow-help-popup', focusAfterOpen: false })
+      .setLngLat(target).setDOMContent(element).addTo(instance);
+    helpPopup.current = popup;
+    selectedHelpId.current = id;
+    setHelpPopupHost({ id, element });
+    popup.on('close', () => {
+      if (helpPopup.current !== popup) return;
+      helpPopup.current = null;
+      selectedHelpId.current = null;
+      setHelpPopupHost(null);
+      const view = helpReturnView.current;
+      helpReturnView.current = null;
+      if (view) instance.easeTo({ ...view,
+        duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 250 });
+      helpMarkers.current.get(id)?.getElement().querySelector('button')?.focus({ preventScroll: true });
+    });
+    instance.easeTo({ center: target, zoom: Math.max(15, instance.getZoom()),
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
+  }, [dismissHelp, dismissEvacuation]);
+
+  beginDirections.current = site => {
+    nodeReturnView.current = null;
+    latest.current.closeDetails();
+    void evacuationRoute.start(site, 'walking');
+  };
+
+  const fitEvacuationRoute = useCallback(() => {
+    const instance = map.current;
+    const lib = library.current;
+    const element = container.current;
+    const route = routeData.current;
+    if (!instance || !lib || !element || !route) return;
+    const bounds = new lib.LngLatBounds();
+    for (const position of route.geometry.coordinates) bounds.extend([position[0], position[1]]);
+    bounds.extend([route.origin.longitude, route.origin.latitude]);
+    bounds.extend([route.destination.longitude, route.destination.latitude]);
+    const rect = element.getBoundingClientRect();
+    const searchRect = element.parentElement?.querySelector('.search-dock')?.getBoundingClientRect();
+    const mobile = window.innerWidth <= 760;
+    const padding = {
+      top: Math.min((searchRect?.bottom ?? rect.top + 140) - rect.top + 24, rect.height * .35),
+      left: mobile ? 24 : 40,
+      right: mobile ? 70 : 80,
+      bottom: mobile ? 80 : 70,
+    };
+    const camera = instance.cameraForBounds(bounds, { padding, maxZoom: 16, bearing: 0 });
+    if (!camera) return;
+    restorePitchAfterZoomOut.current = false;
+    viewTransitioning.current = null;
+    instance.easeTo({ ...camera, pitch: 0,
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 400 });
   }, []);
 
   const focus = useCallback((id: string) => {
@@ -657,10 +697,11 @@ export const MapCanvas = forwardRef<MapHandle, {
     const el = container.current;
     const node = latest.current.nodes.find((item) => item.id === id);
     if (!instance || !el || !node) return;
+    dismissHelp();
     const target: [number, number] = [node.longitude, node.latitude];
     if (!nodeReturnView.current) nodeReturnView.current = returnViewAt(instance, target);
     else nodeReturnView.current.center = target;
-    if (selectedEvacuationId.current) dismissEvacuation(instance);
+    if (selectedEvacuationId.current) dismissEvacuation();
     restorePitchAfterZoomOut.current = false;
 
     const sheet = document.getElementById('details');
@@ -683,47 +724,14 @@ export const MapCanvas = forwardRef<MapHandle, {
       ],
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
     });
-  }, [dismissEvacuation]);
-
-  const refreshSelectedFootprint = useCallback((instance: LibreMap) => {
-    const source = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
-    if (!source || !instance.isStyleLoaded()) return;
-    const id = selectedEvacuationId.current;
-    const site = sitesRef.current.find(item => item.id === id);
-    const buildingLayers = instance.getStyle().layers.filter(layer =>
-      layer.type === 'fill' && 'source-layer' in layer &&
-      layer['source-layer'] === 'building').map(layer => layer.id);
-    const point = site && instance.project([site.longitude, site.latitude]);
-    const building = point && buildingLayers.length && instance.getZoom() >= 13
-      ? instance.queryRenderedFeatures(point, { layers: buildingLayers })
-        .find(feature => feature.geometry.type === 'Polygon' ||
-          feature.geometry.type === 'MultiPolygon')
-      : undefined;
-    const key = building && site
-      ? `${site.id}:${JSON.stringify(building.geometry)}` : '';
-    if (selectedFootprintKey.current === key) return;
-    selectedFootprintKey.current = key;
-    if (!building || !site) {
-      void source.setData(emptyFootprint());
-      return;
-    }
-    void source.setData({
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature', geometry: building.geometry,
-        properties: {
-          height: Number(building.properties?.render_height) || 0,
-          base: Number(building.properties?.render_min_height) || 0,
-        },
-      }],
-    });
-  }, []);
+  }, [dismissEvacuation, dismissHelp]);
 
   const focusEvacuation = useCallback((id: string) => {
     const instance = map.current;
     const lib = library.current;
     const site = sitesRef.current.find(item => item.id === id);
     if (!instance || !lib || !site) return;
+    dismissHelp();
     const target: [number, number] = [site.longitude, site.latitude];
     if (!evacuationReturnView.current) evacuationReturnView.current = returnViewAt(instance, target);
     else evacuationReturnView.current.center = target;
@@ -736,9 +744,6 @@ export const MapCanvas = forwardRef<MapHandle, {
     selectedEvacuationId.current = null;
     sitePopup.current?.remove();
     selectedEvacuationId.current = id;
-    selectedFootprintKey.current = '';
-    const footprint = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
-    if (footprint) void footprint.setData(emptyFootprint());
 
     const content = document.createElement('div');
     content.className = 'evacuation-popup';
@@ -754,12 +759,40 @@ export const MapCanvas = forwardRef<MapHandle, {
     note.textContent = 'Recorded site. Confirm with your LGU that it is open and safe before traveling.';
     const links = document.createElement('div');
     links.className = 'evacuation-popup-links';
-    const directions = document.createElement('a');
-    directions.href = `https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}`;
-    directions.target = '_blank';
-    directions.rel = 'noopener noreferrer';
-    directions.textContent = 'Directions';
-    links.append(directions);
+    const directions = document.createElement('button');
+    directions.type = 'button';
+    directions.className = 'primary-btn';
+    directions.setAttribute('aria-live', 'polite');
+    directionsButton.current = directions;
+    updateDirectionsButton(directions, routeState.current, id);
+    directions.addEventListener('click', event => {
+      event.stopPropagation();
+      if (directions.disabled) return;
+      directions.disabled = true;
+      directions.setAttribute('aria-busy', 'true');
+      directions.textContent = 'Finding route…';
+      beginDirections.current(site);
+    });
+    const googleMaps = document.createElement('a');
+    googleMaps.className = 'evacuation-google-directions';
+    googleMaps.textContent = 'Open in Google Maps';
+    googleMaps.target = '_blank';
+    googleMaps.rel = 'noopener noreferrer';
+    const updateGoogleMapsLink = () => {
+      const params = new URLSearchParams({
+        api: '1', destination: `${site.latitude},${site.longitude}`, travelmode: 'walking',
+      });
+      const origin = latest.current.alertLocation;
+      if (origin && routingLocation(origin.latitude, origin.longitude))
+        params.set('origin', `${origin.latitude},${origin.longitude}`);
+      googleMaps.href = `https://www.google.com/maps/dir/?${params}`;
+    };
+    updateGoogleMapsLink();
+    googleMaps.addEventListener('click', event => {
+      event.stopPropagation();
+      updateGoogleMapsLink();
+    });
+    links.append(directions, googleMaps);
     content.append(icon, heading, location, note, links);
 
     sitePopup.current = new lib.Popup({ offset: 16, maxWidth: '290px', closeOnClick: false,
@@ -769,9 +802,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       if (selectedEvacuationId.current !== id) return;
       selectedEvacuationId.current = null;
       sitePopup.current = null;
-      selectedFootprintKey.current = '';
-      const currentSource = instance.getSource(EVAC_FOOTPRINT_SOURCE_ID) as GeoJSONSource | undefined;
-      if (currentSource) void currentSource.setData(emptyFootprint());
+      directionsButton.current = null;
       const returnView = evacuationReturnView.current;
       evacuationReturnView.current = null;
       if (returnView) instance.easeTo({ ...returnView,
@@ -781,7 +812,7 @@ export const MapCanvas = forwardRef<MapHandle, {
       zoom: Math.max(15, instance.getZoom()),
       pitch: CITY_PITCH, bearing: CITY_BEARING,
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320 });
-  }, []);
+  }, [dismissHelp]);
 
   const finishViewTransitionIfIdle = useCallback((instance: LibreMap, transitionId: number) => {
     if (viewTransitioning.current !== transitionId || instance.isMoving()) return;
@@ -792,8 +823,9 @@ export const MapCanvas = forwardRef<MapHandle, {
   const showPhilippines = useCallback((transitionId?: number) => {
     const instance = map.current;
     if (!instance) return;
+    dismissHelp();
     nodeReturnView.current = null;
-    dismissEvacuation(instance);
+    dismissEvacuation();
     restorePitchAfterZoomOut.current = false;
     instance.fitBounds(PHILIPPINES_OVERVIEW_BOUNDS, {
       padding: overviewPadding(instance.getContainer().clientWidth),
@@ -802,13 +834,14 @@ export const MapCanvas = forwardRef<MapHandle, {
       duration: 320,
     }, transitionId === undefined ? undefined : { flowViewTransition: transitionId });
     if (transitionId !== undefined) finishViewTransitionIfIdle(instance, transitionId);
-  }, [dismissEvacuation, finishViewTransitionIfIdle]);
+  }, [dismissEvacuation, dismissHelp, finishViewTransitionIfIdle]);
 
   const fit = useCallback(() => {
     const instance = map.current;
     const lib = library.current;
     if (!instance || !lib || viewTransitioning.current !== null) return;
-    dismissEvacuation(instance);
+    dismissHelp();
+    dismissEvacuation();
     restorePitchAfterZoomOut.current = false;
     const transitionId = ++nextViewTransition.current;
     viewTransitioning.current = transitionId;
@@ -836,12 +869,13 @@ export const MapCanvas = forwardRef<MapHandle, {
       duration: 320,
     }, { flowViewTransition: transitionId });
     finishViewTransitionIfIdle(instance, transitionId);
-  }, [dismissEvacuation, finishViewTransitionIfIdle, showPhilippines]);
+  }, [dismissEvacuation, dismissHelp, finishViewTransitionIfIdle, showPhilippines]);
 
   const wideView = useCallback(() => {
     const instance = map.current;
     if (!instance || viewTransitioning.current !== null) return;
-    dismissEvacuation(instance);
+    dismissHelp();
+    dismissEvacuation();
     restorePitchAfterZoomOut.current = false;
     const transitionId = ++nextViewTransition.current;
     viewTransitioning.current = transitionId;
@@ -853,11 +887,12 @@ export const MapCanvas = forwardRef<MapHandle, {
       duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320,
     }, { flowViewTransition: transitionId });
     finishViewTransitionIfIdle(instance, transitionId);
-  }, [dismissEvacuation, finishViewTransitionIfIdle]);
+  }, [dismissEvacuation, dismissHelp, finishViewTransitionIfIdle]);
 
   useImperativeHandle(ref, () => ({
     focus,
     focusEvacuation,
+    focusHelpReport,
     fit,
     wideView,
     showPhilippines,
@@ -897,7 +932,7 @@ export const MapCanvas = forwardRef<MapHandle, {
         pitch: CITY_PITCH, bearing: CITY_BEARING, duration: 320 });
       return true;
     },
-  }), [finishViewTransitionIfIdle, focus, focusEvacuation, fit, showPhilippines, wideView]);
+  }), [finishViewTransitionIfIdle, focus, focusEvacuation, focusHelpReport, fit, showPhilippines, wideView]);
 
   useEffect(() => {
     if (!flow.ready) return;
@@ -910,6 +945,7 @@ export const MapCanvas = forwardRef<MapHandle, {
 
     setMapIssue('');
     setHosts([]);
+    setHelpHosts([]);
 
     async function initialize() {
       try {
@@ -957,13 +993,13 @@ export const MapCanvas = forwardRef<MapHandle, {
           bearing: CITY_BEARING,
           canvasContextAttributes: { antialias: true },
           maxTileCacheZoomLevels: window.innerWidth <= 760 ? 5 : 8,
+          cancelPendingTileRequestsWhileZooming: false,
           maxBounds: MAP_LIMITS,
           renderWorldCopies: false,
           transformCameraUpdate: ({ center, zoom, pitch }) => {
             if (zoom <= overviewZoom + 0.01) {
               return { center: overviewCenter, pitch: 0, bearing: 0 };
             }
-            // A pitched wide view exposes far more tiles than a flat one.
             const pitchLimit = CITY_PITCH * Math.max(0, Math.min(1,
               (zoom - WIDE_VIEW_ZOOM) / (FULL_TILT_ZOOM - WIDE_VIEW_ZOOM)));
             if (pitch > pitchLimit + 0.01 && pitchLimit < CITY_PITCH) {
@@ -1004,14 +1040,13 @@ export const MapCanvas = forwardRef<MapHandle, {
         appliedStyle.current = { basemap: initialMode, retry };
         instance.on('style.load', () => {
           if (instance) {
-            selectedFootprintKey.current = '';
-            addHeatLayers(instance, latest.current);
+            addBuildingLayers(instance);
             if (hazardVisibleRef.current && hazardProtocolRegistered)
               addHazardLayer(instance, true, hazardScenarioRef.current);
-            setObservationLayerVisibility(instance, hazardVisibleRef.current,
-              !hazardHadDataInView.current);
+            setObservationLayerVisibility(instance, hazardVisibleRef.current);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
+            addEvacuationRouteLayers(instance, routeData.current);
             addNeighborMask(instance, latest.current.basemap === 'satellite');
             if (hazardVisibleRef.current) refreshHazard(instance);
           }
@@ -1045,11 +1080,8 @@ export const MapCanvas = forwardRef<MapHandle, {
             viewTransitioning.current = null;
           }
           flatViewChange.current(instance.getPitch() <= 1);
-          if (selectedEvacuationId.current) refreshSelectedFootprint(instance);
         });
         instance.on('idle', () => {
-          if (!cancelled && instance && selectedEvacuationId.current)
-            refreshSelectedFootprint(instance);
           if (!cancelled && instance && hazardVisibleRef.current)
             refreshHazard(instance);
         });
@@ -1063,6 +1095,12 @@ export const MapCanvas = forwardRef<MapHandle, {
           }
         };
         instance.on('zoom', updateZoomTier);
+        const updateRipplePitch = () => {
+          container.current?.style.setProperty('--sensor-ripple-pitch',
+            `${instance?.getPitch() ?? 0}deg`);
+        };
+        instance.on('pitch', updateRipplePitch);
+        updateRipplePitch();
         instance.on('pitchend', event => {
           if (event.originalEvent) restorePitchAfterZoomOut.current = false;
         });
@@ -1116,13 +1154,16 @@ export const MapCanvas = forwardRef<MapHandle, {
       observer?.disconnect();
       for (const marker of markers.current.values()) marker.remove();
       markers.current.clear();
+      for (const marker of helpMarkers.current.values()) marker.remove();
+      helpMarkers.current.clear();
+      dismissHelp();
       userMarker.current?.remove();
       selectedEvacuationId.current = null;
       sitePopup.current?.remove();
       sitePopup.current = null;
+      directionsButton.current = null;
       if (evacuationIcon.current) evacuationIcon.current.onload = null;
       evacuationIcon.current = null;
-      selectedFootprintKey.current = '';
       instance?.remove();
       map.current = null;
       appliedStyle.current = null;
@@ -1131,7 +1172,58 @@ export const MapCanvas = forwardRef<MapHandle, {
       viewTransitioning.current = null;
       restorePitchAfterZoomOut.current = false;
     };
-  }, [flow.ready, retry, focusEvacuation, refreshSelectedFootprint, refreshHazard]);
+  }, [flow.ready, retry, focusEvacuation, dismissHelp, refreshHazard]);
+
+  useEffect(() => {
+    const destination = evacuationRoute.site;
+    if (destination?.kind !== 'help-report') return;
+    const report = helpReports.find(item => `help:${item.id}` === destination.id);
+    if (!report || Date.parse(report.expires_at) <= Date.now()
+        || report.latitude !== destination.latitude || report.longitude !== destination.longitude) {
+      routeData.current = null;
+      evacuationRoute.clear();
+      latest.current.notify(report
+        ? 'This help request changed. Open it again for updated directions.'
+        : 'This help request is no longer active. Its route has been cleared.');
+    }
+  }, [helpReports, evacuationRoute.site, evacuationRoute.data, evacuationRoute.clear]);
+
+  useEffect(() => {
+    updateDirectionsButton(directionsButton.current, evacuationRoute,
+      selectedEvacuationId.current);
+    if (evacuationRoute.status === 'error' && evacuationRoute.error) {
+      latest.current.notify(evacuationRoute.error, true);
+    }
+  }, [evacuationRoute.status, evacuationRoute.error, evacuationRoute.site?.id]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!engineVersion || !instance) return;
+    const apply = () => {
+      if (map.current !== instance) return;
+      addEvacuationRouteLayers(instance, routeData.current);
+      const destination = routeData.current?.destination;
+      if (destination?.kind === 'help-report' && routeData.current) {
+        const origin = routeData.current.origin;
+        userMarker.current?.setLngLat([origin.longitude, origin.latitude]);
+      }
+      const sameSelection = destination?.kind === 'help-report'
+        ? !selectedEvacuationId.current && (!selectedHelpId.current || `help:${selectedHelpId.current}` === destination.id)
+        : !selectedHelpId.current && (!selectedEvacuationId.current || selectedEvacuationId.current === destination?.id);
+      if (destination && sameSelection && !latest.current.selectedId) {
+        dismissEvacuation();
+        dismissHelp();
+        fitEvacuationRoute();
+        if (destination.kind === 'help-report') {
+          instance.getCanvas().focus({ preventScroll: true });
+          latest.current.notify('Walking route shown on the map.');
+        }
+      }
+    };
+    if (instance.getStyle()) apply();
+    else instance.once('style.load', apply);
+    return () => { instance.off('style.load', apply); };
+  }, [engineVersion, evacuationRoute.data, dismissEvacuation, dismissHelp, fitEvacuationRoute]);
 
   useEffect(() => {
     const instance = map.current;
@@ -1173,19 +1265,20 @@ export const MapCanvas = forwardRef<MapHandle, {
         if (!cancelled) {
 
           instance.setStyle(withLocalHazard(style, hazardVisibleRef.current,
-            flow.basemap === 'satellite', hazardScenarioRef.current), { diff: true });
+            flow.basemap === 'satellite', hazardScenarioRef.current),
+          { diff: true, transformStyle: preserveFlowLayers });
           appliedStyle.current = { basemap: flow.basemap, retry };
 
 
           const currentStyle = instance.getStyle();
           if (currentStyle?.name === style.name && currentStyle.layers?.length) {
-            addHeatLayers(instance, latest.current);
+            addBuildingLayers(instance);
             if (hazardVisibleRef.current && hazardProtocolRegistered)
               addHazardLayer(instance, true, hazardScenarioRef.current);
-            setObservationLayerVisibility(instance, hazardVisibleRef.current,
-              !hazardHadDataInView.current);
+            setObservationLayerVisibility(instance, hazardVisibleRef.current);
             addEvacuationLayers(instance, sitesRef.current, sitesVisibleRef.current,
               evacuationIcon.current);
+            addEvacuationRouteLayers(instance, routeData.current);
             if (hazardVisibleRef.current) refreshHazard(instance);
           }
         }
@@ -1220,13 +1313,13 @@ export const MapCanvas = forwardRef<MapHandle, {
         appliedHazardScenario.current = hazardScenario;
       }
       if (instance.getLayer(HAZARD_LAYER_ID))
-        setObservationLayerVisibility(instance, true, !hazardHadDataInView.current);
+        setObservationLayerVisibility(instance, true);
       void prepareHazardProtocol(lib).then(() => {
         if (cancelled || map.current !== instance || !hazardVisibleRef.current) return;
         hazardArchiveReady.current = true;
-        if (instance.getSource(HEAT_SOURCE_ID)) {
+        if (instance.getStyle()?.layers?.length) {
           addHazardLayer(instance, true, hazardScenario);
-          setObservationLayerVisibility(instance, true, !hazardHadDataInView.current);
+          setObservationLayerVisibility(instance, true);
           refreshHazard(instance);
         }
       }).catch(() => {
@@ -1253,18 +1346,6 @@ export const MapCanvas = forwardRef<MapHandle, {
   useEffect(() => {
     const instance = map.current;
     if (!engineVersion || !instance) return;
-    const source = instance.getSource(HEAT_SOURCE_ID) as GeoJSONSource | undefined;
-    if (!source) return;
-    const data = heatData(flow);
-    const snapshot = JSON.stringify(data);
-    if (snapshot === lastHeatSnapshot.current) return;
-    lastHeatSnapshot.current = snapshot;
-    void source.setData(data);
-  }, [engineVersion, flow.visibleNodes, flow.getStatus]);
-
-  useEffect(() => {
-    const instance = map.current;
-    if (!engineVersion || !instance) return;
     const source = instance.getSource(EVAC_SOURCE_ID) as GeoJSONSource | undefined;
     if (!source) return;
     void source.setData(evacuationData(evacuationSites));
@@ -1282,6 +1363,87 @@ export const MapCanvas = forwardRef<MapHandle, {
         : showEvacuationSites ? 'visible' : 'none');
     if (!showEvacuationSites) sitePopup.current?.remove();
   }, [engineVersion, showEvacuationSites]);
+
+  useLayoutEffect(() => {
+    const instance = map.current;
+    const popup = helpPopup.current;
+    if (!helpPopupHost || !instance || !popup) return;
+    const element = popup.getElement();
+    const mapElement = instance.getContainer();
+    const header = document.querySelector<HTMLElement>('.app-header');
+    const viewport = window.visualViewport;
+    let shiftX = 0;
+    let shiftY = 0;
+    const position = () => {
+      if (helpPopup.current !== popup) return;
+      const bounds = mapElement.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const left = Math.max(bounds.left, viewportLeft) + 12;
+      const right = Math.min(bounds.right, viewportLeft + (viewport?.width ?? window.innerWidth)) - 12;
+      const top = Math.max(bounds.top, viewportTop, header?.getBoundingClientRect().bottom ?? bounds.top) + 12;
+      const bottom = Math.min(bounds.bottom, viewportTop + (viewport?.height ?? window.innerHeight)) - 12;
+      const naturalLeft = rect.left - shiftX;
+      const naturalTop = rect.top - shiftY;
+      shiftX = Math.max(left, Math.min(naturalLeft, right - rect.width)) - naturalLeft;
+      shiftY = Math.max(top, Math.min(naturalTop, bottom - rect.height)) - naturalTop;
+      element.style.translate = `${shiftX}px ${shiftY}px`;
+      element.classList.toggle('help-popup-shifted', Math.abs(shiftX) > 1 || Math.abs(shiftY) > 1);
+    };
+    position();
+    helpPopupHost.element.querySelector<HTMLElement>('.help-popup-content')?.focus({ preventScroll: true });
+    const observer = new ResizeObserver(position);
+    observer.observe(element);
+    observer.observe(mapElement);
+    if (header) observer.observe(header);
+    instance.on('move', position);
+    window.addEventListener('resize', position);
+    viewport?.addEventListener('resize', position);
+    viewport?.addEventListener('scroll', position);
+    return () => {
+      observer.disconnect();
+      instance.off('move', position);
+      window.removeEventListener('resize', position);
+      viewport?.removeEventListener('resize', position);
+      viewport?.removeEventListener('scroll', position);
+      element.style.removeProperty('translate');
+      element.classList.remove('help-popup-shifted');
+    };
+  }, [helpPopupHost]);
+
+  useEffect(() => {
+    const instance = map.current;
+    const lib = library.current;
+    if (!engineVersion || !instance || !lib) return;
+    const active = new Set(helpReports.map(report => report.id));
+    let changed = false;
+    for (const [id, marker] of helpMarkers.current) {
+      if (!active.has(id)) {
+        marker.remove();
+        helpMarkers.current.delete(id);
+        changed = true;
+      }
+    }
+    for (const report of helpReports) {
+      let marker = helpMarkers.current.get(report.id);
+      if (!marker) {
+        const element = document.createElement('div');
+        element.className = 'help-marker-host';
+        marker = new lib.Marker({ element, anchor: 'bottom' })
+          .setLngLat([report.longitude, report.latitude]).addTo(instance);
+        helpMarkers.current.set(report.id, marker);
+        changed = true;
+      }
+      marker.setLngLat([report.longitude, report.latitude]);
+    }
+    if (changed) setHelpHosts([...helpMarkers.current].map(([id, marker]) => ({ id, element: marker.getElement() })));
+    if (helpPopupHost) {
+      const report = helpReports.find(item => item.id === helpPopupHost.id);
+      if (!report) dismissHelp();
+      else helpPopup.current?.setLngLat([report.longitude, report.latitude]);
+    }
+  }, [engineVersion, helpReports, helpPopupHost, dismissHelp]);
 
   useEffect(() => {
     const instance = map.current;
@@ -1318,6 +1480,35 @@ export const MapCanvas = forwardRef<MapHandle, {
   }, [engineVersion, flow.visibleNodes]);
 
   useEffect(() => {
+    if (!hosts.length) return;
+    const visible = new Set<HTMLElement>();
+    const updatePlayback = () => {
+      for (const { element } of hosts) {
+        element.dataset.ripplePaused = String(document.hidden || !visible.has(element));
+      }
+    };
+    const observer = typeof IntersectionObserver === 'undefined' ? null
+      : new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          const element = entry.target as HTMLElement;
+          if (entry.isIntersecting) visible.add(element);
+          else visible.delete(element);
+        }
+        updatePlayback();
+      }, { root: container.current, rootMargin: '80px' });
+    for (const { element } of hosts) {
+      if (observer) observer.observe(element);
+      else visible.add(element);
+    }
+    updatePlayback();
+    document.addEventListener('visibilitychange', updatePlayback);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', updatePlayback);
+    };
+  }, [hosts]);
+
+  useEffect(() => {
     if (!engineVersion || !flow.selectedId) {
       lastFocused.current = null;
       return;
@@ -1345,6 +1536,62 @@ export const MapCanvas = forwardRef<MapHandle, {
   return (
     <>
       <div ref={container} id="map" aria-label="Geographic monitoring map" />
+      {helpHosts.map(({ id, element }) => {
+        const report = helpReports.find(item => item.id === id);
+        if (!report) return null;
+        return createPortal(<button type="button" className="help-marker"
+          aria-label={`${report.name || 'Someone'} needs help. Open unverified community report.`}
+          onClick={event => { event.stopPropagation(); focusHelpReport(id); }}>
+          <Icon name="help-person" /><span>HELP</span>
+        </button>, element, id);
+      })}
+      {helpPopupHost && (() => {
+        const report = helpReports.find(item => item.id === helpPopupHost.id);
+        if (!report) return null;
+        const routeId = `help:${report.id}`;
+        const routeStatus = evacuationRoute.site?.id === routeId ? evacuationRoute.status : 'idle';
+        const routeBusy = routeStatus === 'locating' || routeStatus === 'loading';
+        return createPortal(<div className="help-popup-content" role="region" aria-label="Help request details"
+          tabIndex={-1} onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              helpPopup.current?.remove();
+            }
+          }}>
+          <h3>Help requested</h3>
+          <p className="help-unverified">Community report · unverified</p>
+          {!helpReportsLive && <p>Updates paused. This report may be out of date.</p>}
+          <ReportDetails report={report} compact />
+          <p>No response or rescue has been confirmed.</p>
+          <button type="button" className="primary-btn help-directions" disabled={routeBusy}
+            aria-busy={routeBusy} aria-live="polite" onClick={event => {
+              event.stopPropagation();
+              if (routeBusy || event.currentTarget.disabled) return;
+              if (Date.parse(report.expires_at) <= Date.now()) {
+                flow.notify('This help request has expired. Refresh the reports to see current requests.', true);
+                return;
+              }
+              event.currentTarget.disabled = true;
+              nodeReturnView.current = null;
+              flow.closeDetails();
+              void evacuationRoute.start({ id: routeId, kind: 'help-report',
+                name: report.name || 'Help requested', latitude: report.latitude, longitude: report.longitude },
+              'walking', { freshLocation: true });
+            }}>
+            <Icon name="route" />{routeStatus === 'locating' ? 'Finding location…'
+              : routeStatus === 'loading' ? 'Finding route…' : 'Get Directions'}
+          </button>
+          <a className="secondary-btn help-google-maps" target="_blank" rel="noopener noreferrer"
+            href={`https://www.google.com/maps/search/?api=1&query=${report.latitude},${report.longitude}`}
+            onClick={event => event.stopPropagation()}>
+            <Icon name="arrow-up-right" />Open in Google Maps
+          </a>
+          <p>Route to the nearest mapped path. Flood conditions and access are not verified.</p>
+          {report.id === ownReportId && <button type="button" className="secondary-btn"
+            onClick={() => flow.setModal('report')}>Manage my request</button>}
+        </div>, helpPopupHost.element);
+      })()}
       {mapIssue && (
         <div className="map-provider-notice" role="status">
           <span>{mapIssue}</span>
@@ -1359,13 +1606,13 @@ export const MapCanvas = forwardRef<MapHandle, {
           <button
             type="button"
             className={`map-node${flow.selectedId === id ? ' selected' : ''}`}
-            style={{ '--status-color': status.color } as CSSProperties}
             data-level={status.level ?? 'unavailable'}
             data-unavailable={status.level === null}
+            data-ripple-active={status.level !== null && !status.connectionLost}
             data-zoom-tier={zoomTier}
             aria-label={`${node.name}: ${status.label} at this sensor. Open details.`}
             aria-pressed={flow.selectedId === id}
-            title={`${status.label} at this sensor. Shading does not show flood extent.`}
+            title={`${node.name}: ${status.label}. Open sensor details.`}
             onClick={(event) => {
               event.stopPropagation();
               flow.selectNode(id);
@@ -1373,6 +1620,11 @@ export const MapCanvas = forwardRef<MapHandle, {
             }}
           >
             <span className="marker-label">{node.name}</span>
+            <span className="sensor-ripples" aria-hidden="true">
+              <span className="sensor-ripple" />
+              <span className="sensor-ripple" />
+              <span className="sensor-ripple" />
+            </span>
             <span className="pin-ring"><Icon name="sensor" /></span>
           </button>,
           element,

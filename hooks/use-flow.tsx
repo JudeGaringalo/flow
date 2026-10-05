@@ -99,8 +99,6 @@ function useFlowController() {
     }
     setLocationWorking(true);
     setLocationError('');
-    // Request notification permission from the same button press. Some browsers
-    // reject a permission request if it follows an awaited location prompt.
     const permission = (async (): Promise<NotificationPermission | 'unsupported'> => {
       if (!('Notification' in window)) return 'unsupported';
       if (Notification.permission !== 'default') return Notification.permission;
@@ -145,7 +143,7 @@ function useFlowController() {
             if (permission.state === 'denied') {
               try { localStorage.removeItem(locationEnabledKey); } catch { }
             }
-          } catch { /* Use the previous successful choice if permission querying is unavailable. */ }
+          } catch {  }
         }
         if (!cancelled && granted) {
           const position = await currentPosition();
